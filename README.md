@@ -32,7 +32,7 @@ python3 koa/plan.py <이름>          # 어떤 MCP 를 붙일지 계획
 python3 koa/plan.py <이름> --apply  # verified 서버 등록
 ```
 
-자세히: [koa/README.md](koa/README.md)
+자세히: [koa/README.md](koa/README.md) · 정리 문서: [docs/koa-cluster-discovery.md](docs/koa-cluster-discovery.md)
 
 ## MCP
 
