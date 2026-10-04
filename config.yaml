@@ -17,7 +17,7 @@ mcp_servers:
     command: npx
     args:
       - -y
-      - mcp-server-kubernetes
+      - mcp-server-kubernetes@4.1.9
     env:
       ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS: "true"
       KUBECONFIG_PATH: ${userHome}/.kube/hermes-readonly.yaml
@@ -27,10 +27,12 @@ mcp_servers:
         - kubectl_describe
         - kubectl_logs
         - explain_resource
+      prompts: false
+      resources: false
   opensearch:
     command: uvx
     args:
-      - opensearch-mcp-server-py
+      - opensearch-mcp-server-py@0.11.0
     env:
       OPENSEARCH_URL: ${OPENSEARCH_URL}
       OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
