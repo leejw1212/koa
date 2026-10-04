@@ -33,8 +33,9 @@ mcp_servers:
       - opensearch-mcp-server-py
     env:
       OPENSEARCH_URL: ${OPENSEARCH_URL}
-      OPENSEARCH_NO_AUTH: "true"
       OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
+      OPENSEARCH_USERNAME: ${OPENSEARCH_USERNAME}
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD}
     tools:
       include:
         - ListIndexTool
