@@ -27,3 +27,20 @@ mcp_servers:
         - kubectl_describe
         - kubectl_logs
         - explain_resource
+  opensearch:
+    command: uvx
+    args:
+      - opensearch-mcp-server-py
+    env:
+      OPENSEARCH_URL: ${OPENSEARCH_URL}
+      OPENSEARCH_NO_AUTH: "true"
+      OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
+    tools:
+      include:
+        - ListIndexTool
+        - IndexMappingTool
+        - SearchIndexTool
+        - GetShardsTool
+        - ClusterHealthTool
+      prompts: false
+      resources: false
