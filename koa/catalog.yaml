@@ -1,0 +1,237 @@
+# KOA 카탈로그 — "클러스터에서 무엇을 찾을지"와 "찾으면 어떤 MCP 를 붙일지".
+#
+# discover.py 는 components 규칙으로 클러스터의 구성요소를 찾는다.
+# plan.py 는 클러스터 프로필 + mcp_servers 규칙으로 설치 계획을 만든다.
+#
+# status
+#   verified  : 우리가 lab 에서 직접 붙여 보고 읽기 전용임을 확인했다. --apply 로 바로 등록된다.
+#   candidate : README 로 읽기 전용 설정을 확인했지만 아직 붙여 보지 않았다.
+#               --with <이름> 으로 명시해야만 등록된다.
+
+# ─── 구성요소 감지 규칙 ───────────────────────────────────────────
+# image : 컨테이너 이미지 이름(레지스트리·태그 제외)에 대한 정규식
+# crd   : 이 API 그룹이 있으면 감지 근거로 쓴다
+# ports : 서비스 포트 이름/번호 힌트 (감지 근거가 아니라 표시용)
+# probe : 접근 주소를 알 때 GET 으로 확인할 경로 (읽기만 한다)
+components:
+  prometheus:
+    kind: metrics
+    image: '(^|/)prometheus/prometheus$|(^|/)prom/prometheus$'
+    crd: monitoring.coreos.com
+    ports: [9090]
+    probe: /-/healthy
+  alertmanager:
+    kind: alerting
+    image: '(^|/)prometheus/alertmanager$|(^|/)prom/alertmanager$'
+    ports: [9093]
+    probe: /-/healthy
+  thanos:
+    kind: metrics
+    image: '(^|/)thanos(io)?/thanos$'
+    ports: [10902, 9090]
+  victoriametrics:
+    kind: metrics
+    image: '(^|/)victoriametrics/(victoria-metrics|vmselect|vmsingle)$'
+    crd: operator.victoriametrics.com
+    ports: [8428, 8481]
+  kube-state-metrics:
+    kind: metrics-exporter
+    image: 'kube-state-metrics$'
+  node-exporter:
+    kind: metrics-exporter
+    image: 'node-exporter$'
+  grafana:
+    kind: dashboard
+    image: '(^|/)grafana/grafana(-oss|-enterprise)?$'
+    ports: [3000]
+    probe: /api/health
+  loki:
+    kind: logs
+    image: '(^|/)grafana/loki$'
+    ports: [3100]
+    probe: /ready
+  opensearch:
+    kind: logs
+    image: '(^|/)opensearchproject/opensearch$'
+    crd: opensearch.opster.io
+    ports: [9200]
+    probe: /
+  elasticsearch:
+    kind: logs
+    image: '(^|/)elasticsearch(/elasticsearch)?$'
+    crd: elasticsearch.k8s.elastic.co
+    ports: [9200]
+    probe: /
+  fluentd:
+    kind: log-shipper
+    image: 'fluentd'
+    crd: logging.banzaicloud.io
+  fluent-bit:
+    kind: log-shipper
+    image: 'fluent-bit$'
+  vector:
+    kind: log-shipper
+    image: '(^|/)timberio/vector$|(^|/)vector$'
+  otel-collector:
+    kind: telemetry-collector
+    image: 'opentelemetry-collector'
+    crd: opentelemetry.io
+  tempo:
+    kind: traces
+    image: '(^|/)grafana/tempo$'
+  jaeger:
+    kind: traces
+    image: 'jaeger'
+    crd: jaegertracing.io
+  argocd:
+    kind: gitops
+    image: '(^|/)argoproj/argocd$'
+    crd: argoproj.io
+    probe: /healthz
+  flux:
+    kind: gitops
+    image: '(^|/)fluxcd/(source|kustomize|helm)-controller$'
+    crd: toolkit.fluxcd.io
+  rabbitmq:
+    kind: message-queue
+    image: '(^|/)rabbitmq$|bitnami/rabbitmq$'
+    crd: rabbitmq.com
+    ports: [5672, 15672, 15692]
+    probe: /api/overview
+  kafka:
+    kind: message-queue
+    image: 'kafka'
+    crd: kafka.strimzi.io
+    ports: [9092]
+  redis:
+    kind: cache
+    image: '(^|/)redis$|bitnami/redis$|valkey'
+    ports: [6379]
+  ingress-nginx:
+    kind: ingress
+    image: 'ingress-nginx/controller'
+  metrics-server:
+    kind: metrics-api
+    image: 'metrics-server$'
+
+# ─── MCP 서버 규칙 ───────────────────────────────────────────────
+# when       : 이 조건이 프로필에 있으면 붙일 후보가 된다
+#              (k8s_read = k8s 조회 권한 있음 / component:<이름> = 그 구성요소 감지됨)
+# requires_env: ~/.hermes/.env 에 값이 있어야 하는 변수. 없으면 등록하지 않고 안내만 한다.
+# url_env    : 접근 주소 변수. 프로필에서 찾은 주소를 제안값으로 보여준다.
+# server     : Hermes config.yaml 의 mcp_servers.<이름> 에 그대로 들어갈 값
+mcp_servers:
+  kubernetes:
+    status: verified
+    when: k8s_read
+    note: 읽기 전용 SA kubeconfig + 비파괴 도구 모드 + 조회 도구 4개만
+    server:
+      command: npx
+      args: [-y, mcp-server-kubernetes@4.1.9]
+      env:
+        ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS: "true"
+        KUBECONFIG_PATH: ${userHome}/.kube/hermes-readonly.yaml
+      tools:
+        include: [kubectl_get, kubectl_describe, kubectl_logs, explain_resource]
+        prompts: false
+        resources: false
+
+  opensearch:
+    status: verified
+    when: component:opensearch
+    requires_env: [OPENSEARCH_URL, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD]
+    url_env: OPENSEARCH_URL
+    note: 쓰기 설정 끔 + 조회 도구 5개만. 계정은 OpenSearch 쪽 읽기 전용 역할이어야 한다
+    server:
+      command: uvx
+      args: [opensearch-mcp-server-py@0.11.0]
+      env:
+        OPENSEARCH_URL: ${OPENSEARCH_URL}
+        OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
+        OPENSEARCH_USERNAME: ${OPENSEARCH_USERNAME}
+        OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD}
+      tools:
+        include: [ListIndexTool, IndexMappingTool, SearchIndexTool, GetShardsTool, ClusterHealthTool]
+        prompts: false
+        resources: false
+
+  prometheus:
+    status: candidate
+    when: component:prometheus
+    requires_env: [PROMETHEUS_URL]
+    url_env: PROMETHEUS_URL
+    note: PromQL 은 쓰기를 표현할 수 없어 도구 자체가 읽기 전용. 인증이 있으면 PROMETHEUS_USERNAME/PASSWORD 또는 PROMETHEUS_TOKEN 추가
+    server:
+      command: uvx
+      args: [prometheus-mcp-server@1.6.2]
+      env:
+        PROMETHEUS_URL: ${PROMETHEUS_URL}
+        PROMETHEUS_DISABLE_LINKS: "True"
+      tools:
+        include: [execute_query, execute_range_query, list_metrics, get_metric_metadata, get_targets]
+        prompts: false
+        resources: false
+
+  grafana:
+    status: candidate
+    when: component:grafana
+    requires_env: [GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN]
+    url_env: GRAFANA_URL
+    note: --disable-write 로 쓰기 도구 미등록. 서비스 계정은 Viewer 역할. Prometheus·Loki 를 Grafana 데이터소스로 함께 조회할 수 있다
+    server:
+      command: uvx
+      args: [mcp-grafana@2.0.0, --disable-write]
+      env:
+        GRAFANA_URL: ${GRAFANA_URL}
+        GRAFANA_SERVICE_ACCOUNT_TOKEN: ${GRAFANA_SERVICE_ACCOUNT_TOKEN}
+      tools:
+        prompts: false
+        resources: false
+
+  argocd:
+    status: candidate
+    when: component:argocd
+    requires_env: [ARGOCD_BASE_URL, ARGOCD_API_TOKEN]
+    url_env: ARGOCD_BASE_URL
+    note: MCP_READ_ONLY + 조회 도구만. 토큰은 읽기 전용 role(get/list) 계정으로 발급
+    server:
+      command: npx
+      args: [-y, argocd-mcp@0.9.0, stdio]
+      env:
+        ARGOCD_BASE_URL: ${ARGOCD_BASE_URL}
+        ARGOCD_API_TOKEN: ${ARGOCD_API_TOKEN}
+        MCP_READ_ONLY: "true"
+      tools:
+        include: [list_applications, get_application, get_application_resource_tree, get_application_managed_resources, get_resource_events]
+        prompts: false
+        resources: false
+
+  rabbitmq:
+    status: candidate
+    when: component:rabbitmq
+    requires_env: [RABBITMQ_MANAGEMENT_ENDPOINT]
+    url_env: RABBITMQ_MANAGEMENT_ENDPOINT
+    note: >-
+      --allow-mutative-tools 없이 실행해 쓰기 도구 미등록, read/observability/health 그룹만.
+      계정은 monitoring 태그 사용자. 주의: 이 서버는 SSRF 방지로 localhost·사설 IP 접속을 막는다
+      (kind 처럼 localhost 로만 열린 클러스터는 접속 불가).
+      값 형식 https://user:pass@host:443 — 비밀번호가 URL 에 들어가므로 .env 에만 둔다
+    server:
+      command: uvx
+      args: [amq-mcp-server-rabbitmq@4.0.0, --v4, --tool-groups, read, observability, health]
+      env:
+        RABBITMQ_MANAGEMENT_ENDPOINT: ${RABBITMQ_MANAGEMENT_ENDPOINT}
+      tools:
+        prompts: false
+        resources: false
+
+# MCP 가 아직 없거나 다른 경로로 보는 구성요소 (plan.py 가 안내만 한다)
+no_adapter:
+  loki: Grafana MCP 의 Loki 데이터소스로 조회 (grafana 후보 참고)
+  elasticsearch: '@elastic/mcp-server-elasticsearch 가 있지만 아직 카탈로그에 없음 (검증 필요)'
+  fluentd: 전용 MCP 없음. prometheus 플러그인 지표 → Prometheus 로 보는 것이 정석
+  fluent-bit: 전용 MCP 없음. 내장 HTTP 지표(2020 포트) → Prometheus
+  kafka: 카탈로그에 없음 (검증 필요)
+  redis: 카탈로그에 없음 (장애 분석용으로는 지표가 우선)
+  thanos: Prometheus 호환 API → prometheus 후보의 PROMETHEUS_URL 로 Thanos Query 주소를 쓴다
+  victoriametrics: Prometheus 호환 API → prometheus 후보의 PROMETHEUS_URL 로 vmselect 주소를 쓴다

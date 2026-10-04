@@ -24,6 +24,16 @@ git clone git@github.com:leejw1212/koa.git ~/hermes-config
 - 에이전트 터미널: `terminal/agent-env.sh` 가 `KUBECONFIG` 를 읽기 전용 kubeconfig 로 고정한다
   (`terminal.shell_init_files`, 새 세션부터). 저장소를 `~/hermes-config` 가 아닌 곳에 clone 하면 config 의 경로를 맞춘다.
 
+## 클러스터 탐색 → MCP 설치 (KOA 첫 동작)
+
+```bash
+python3 koa/discover.py --probe     # 클러스터 프로필 clusters/<이름>.yaml
+python3 koa/plan.py <이름>          # 어떤 MCP 를 붙일지 계획
+python3 koa/plan.py <이름> --apply  # verified 서버 등록
+```
+
+자세히: [koa/README.md](koa/README.md)
+
 ## MCP
 
 전체 절차와 검증 방법: [docs/setup-guide.md](docs/setup-guide.md)
