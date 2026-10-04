@@ -1,0 +1,28 @@
+model:
+  provider: anthropic
+  default: claude-opus-5-5
+  base_url: https://api.anthropic.com
+  api_mode: anthropic_messages
+agent:
+  max_turns: 150
+  reasoning_effort: medium
+  service_tier: fast
+browser:
+  use_real_profile: true
+onboarding:
+  seen:
+    profile_build_offered: true
+mcp_servers:
+  kubernetes:
+    command: npx
+    args:
+      - -y
+      - mcp-server-kubernetes
+    env:
+      ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS: "true"
+    tools:
+      include:
+        - kubectl_get
+        - kubectl_describe
+        - kubectl_logs
+        - explain_resource
