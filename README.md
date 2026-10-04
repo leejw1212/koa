@@ -19,7 +19,10 @@ git clone git@github.com:leejw1212/koa.git ~/hermes-config
 - `~/.hermes/config.yaml` 이 링크라서 `hermes config set` 은 **이 저장소 파일을 바로 고친다.**
   설정 바꾼 뒤 `git diff` → 커밋.
 - 장비마다 다른 값은 `${VAR}` 로 쓰고 `.env` 에 둔다.
-- 변경 반영: MCP 는 `/reload-mcp`, 그 외는 Hermes 재시작(새 세션).
+- 변경 반영: **데스크톱 앱 재시작** (MCP 서버가 다시 뜸. 새 채팅만으로는 안 바뀜).
+  메시징 게이트웨이를 쓰면 `hermes gateway restart` 도 — 게이트웨이는 앱과 별도 프로세스라 MCP 서버를 따로 띄운다.
+- 에이전트 터미널: `terminal/agent-env.sh` 가 `KUBECONFIG` 를 읽기 전용 kubeconfig 로 고정한다
+  (`terminal.shell_init_files`, 새 세션부터). 저장소를 `~/hermes-config` 가 아닌 곳에 clone 하면 config 의 경로를 맞춘다.
 
 ## MCP
 

@@ -47,3 +47,9 @@ mcp_servers:
         - ClusterHealthTool
       prompts: false
       resources: false
+terminal:
+  shell_init_files:
+    - ~/.profile
+    - ~/.bash_profile
+    - ~/.bashrc
+    - ~/hermes-config/terminal/agent-env.sh

@@ -27,4 +27,8 @@ if [ ! -f "$HOME/.kube/hermes-readonly.yaml" ]; then
   echo "주의: ~/.kube/hermes-readonly.yaml 없음 → $REPO/k8s/make-readonly-kubeconfig.sh [context] 실행"
 fi
 
-echo "완료. 실행 중인 Hermes 에서는 /reload-mcp (MCP 변경) 또는 재시작."
+if [ "$REPO" != "$HOME/hermes-config" ]; then
+  echo "주의: 저장소가 ~/hermes-config 가 아니다 → config.yaml 의 terminal.shell_init_files 경로를 $REPO/terminal/agent-env.sh 로 바꿔라"
+fi
+
+echo "완료. 데스크톱 앱 재시작 (게이트웨이를 쓰면 hermes gateway restart 도)."

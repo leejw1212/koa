@@ -120,7 +120,12 @@ OpenSearch 쪽 계정도 읽기 전용 역할만 줘야 이중으로 잠긴다.
 
 ## 5. 적용과 검증
 
-적용: `/reload-mcp` 또는 새 세션.
+적용: **데스크톱 앱 재시작.** 새 채팅만으로는 MCP 서버가 다시 뜨지 않는다(확인함: 새 채팅에서는 `prompts/resources: false` 가 반영되지 않았고, 앱 재시작 후 반영됨).
+메시징 게이트웨이(`hermes gateway`)를 쓰면 그쪽도 `hermes gateway restart` — 게이트웨이는 앱과 별도로 MCP 서버를 띄운다.
+
+확인: 도구 목록에 `mcp__kubernetes__*` 가 4개(`kubectl_get/describe/logs`, `explain_resource`)만 있어야 한다.
+`list_prompts`, `get_prompt`, `list_resources`, `read_resource` 가 보이면 아직 재시작 전이다.
+프로세스로 확인: `ps -axo lstart,command | grep -E 'mcp-server-kubernetes|opensearch-mcp-server'` → 고정 버전(`@4.1.9`, `@0.11.0`)과 재시작 시각.
 
 도구 이름: Hermes 문서는 `mcp_<서버>_<도구>` 형식이라고 하지만, 이 환경(v0.21.5 데스크톱)에서는
 `mcp__kubernetes__kubectl_get`, `mcp__opensearch__ClusterHealthTool` 형식으로 등록된다.
@@ -145,5 +150,34 @@ OpenSearch 쪽 계정도 읽기 전용 역할만 줘야 이중으로 잠긴다.
 | MCP 서버 | `ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS`, `OPENSEARCH_SETTINGS_ALLOW_WRITE=false` | 서버가 파괴적 도구를 등록하지 않음 |
 | API 서버 | 읽기 전용 SA + RBAC / OpenSearch 읽기 전용 계정 | 위 두 층이 뚫려도 쓰기·exec·Secret 조회 거부 |
 
-남은 구멍: 에이전트의 터미널 도구는 내 계정의 `~/.kube/config`(admin)를 쓸 수 있다.
-막는 방법은 [blog-k8s-readonly-mcp.md](blog-k8s-readonly-mcp.md)의 "남은 구멍" 절을 참고한다.
+## 터미널 도구의 kubectl
+
+MCP 경로가 잠겨 있어도 에이전트의 터미널 도구는 별개다. 그대로 두면 `~/.kube/config`(admin)를 쓴다.
+(실측: 터미널에서 `kubectl auth can-i delete pods` → `yes`, `list secrets` → `yes`)
+
+조치: 에이전트 터미널의 기본 `KUBECONFIG`를 읽기 전용 kubeconfig로 고정한다.
+
+```yaml
+# config.yaml (hermes config set terminal.shell_init_files '[...]' 로 넣음)
+terminal:
+  shell_init_files:
+    - ~/.profile          # 목록을 명시하면 기본 자동 source 가 꺼지므로 기본 3개를 함께 적는다
+    - ~/.bash_profile
+    - ~/.bashrc
+    - ~/hermes-config/terminal/agent-env.sh   # export KUBECONFIG=$HOME/.kube/hermes-readonly.yaml
+```
+
+- 세션 시작 시 터미널 환경 스냅샷을 만들 때 source 된다 → **새 채팅부터** 적용, 진행 중인 채팅은 그대로.
+- 사람의 셸(`~/.zshrc`)에는 영향 없다.
+
+확인 (새 채팅의 터미널에서):
+
+```bash
+kubectl config current-context        # kind-lab-readonly
+kubectl auth can-i delete pods -A     # no
+kubectl auth can-i list secrets -A    # no
+```
+
+**한계:** 기본값을 바꿀 뿐 보안 경계가 아니다. 에이전트가 `--kubeconfig ~/.kube/config`나 `KUBECONFIG=...`를 직접 지정하면 admin으로 접근할 수 있다.
+admin kubeconfig 파일이 같은 계정에 있는 한 완전히 막을 수는 없다. 완전히 막으려면 이 프로필에서 터미널 도구를 끄거나,
+터미널 백엔드를 docker로 바꿔 `~/.kube/config`를 마운트하지 않아야 한다. 상세: [blog-k8s-readonly-mcp.md](blog-k8s-readonly-mcp.md)의 "남은 구멍" 절.
