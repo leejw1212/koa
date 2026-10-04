@@ -25,4 +25,17 @@ git clone git@github.com:leejw1212/koa.git ~/hermes-config
 
 - `kubernetes` — `mcp-server-kubernetes`, 비파괴 모드 + 조회 도구 4개만 노출
   (`kubectl_get`, `kubectl_describe`, `kubectl_logs`, `explain_resource`).
-  kubeconfig 는 `~/.kube/config` 현재 컨텍스트.
+  kubeconfig 는 **읽기 전용 SA** 전용 파일 `~/.kube/hermes-readonly.yaml` (`KUBECONFIG_PATH`).
+  도구 필터가 풀려도 쓰기·exec·Secret 조회는 API 서버(RBAC)에서 거부된다.
+
+### 읽기 전용 kubeconfig 만들기 (장비/클러스터마다 1회)
+
+```bash
+~/hermes-config/k8s/make-readonly-kubeconfig.sh            # 현재 컨텍스트 기준
+~/hermes-config/k8s/make-readonly-kubeconfig.sh kind-lab   # 컨텍스트 지정
+```
+
+- `k8s/hermes-readonly.yaml` 적용: ns `hermes`, SA `hermes-readonly`, ClusterRole `view` + 노드/PV 조회.
+- 생성된 kubeconfig 에는 토큰이 들어 있으므로 **저장소에 넣지 않는다** (600 권한).
+- 토큰 폐기: `kubectl -n hermes delete secret hermes-readonly-token` 후 스크립트 재실행.
+- 확인: `kubectl --kubeconfig ~/.kube/hermes-readonly.yaml auth can-i delete pods -A` → `no`

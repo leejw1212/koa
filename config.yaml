@@ -20,6 +20,7 @@ mcp_servers:
       - mcp-server-kubernetes
     env:
       ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS: "true"
+      KUBECONFIG_PATH: ${userHome}/.kube/hermes-readonly.yaml
     tools:
       include:
         - kubectl_get

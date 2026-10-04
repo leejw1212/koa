@@ -22,4 +22,9 @@ if [ ! -f "$HOME_DIR/.env" ]; then
   echo "$HOME_DIR/.env 를 만들었다 — 값을 채워라"
 fi
 
+# kubernetes MCP 는 읽기 전용 kubeconfig 를 쓴다. 없으면 안내만 한다(클러스터 접근이 필요하므로 자동 실행 안 함).
+if [ ! -f "$HOME/.kube/hermes-readonly.yaml" ]; then
+  echo "주의: ~/.kube/hermes-readonly.yaml 없음 → $REPO/k8s/make-readonly-kubeconfig.sh [context] 실행"
+fi
+
 echo "완료. 실행 중인 Hermes 에서는 /reload-mcp (MCP 변경) 또는 재시작."
