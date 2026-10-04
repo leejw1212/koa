@@ -23,6 +23,10 @@ git clone git@github.com:leejw1212/koa.git ~/hermes-config
 
 ## MCP
 
+전체 절차와 검증 방법: [docs/setup-guide.md](docs/setup-guide.md)
+
+- `opensearch` — `opensearch-mcp-server-py`, 쓰기 차단(`OPENSEARCH_SETTINGS_ALLOW_WRITE=false`) + 조회 도구 5개만 노출.
+  접속 정보는 `~/.hermes/.env` 의 `OPENSEARCH_URL/USERNAME/PASSWORD`.
 - `kubernetes` — `mcp-server-kubernetes`, 비파괴 모드 + 조회 도구 4개만 노출
   (`kubectl_get`, `kubectl_describe`, `kubectl_logs`, `explain_resource`).
   kubeconfig 는 **읽기 전용 SA** 전용 파일 `~/.kube/hermes-readonly.yaml` (`KUBECONFIG_PATH`).
