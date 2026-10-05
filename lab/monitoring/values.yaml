@@ -1,0 +1,75 @@
+# kind-lab 용 kube-prometheus-stack (Prometheus + Alertmanager + Grafana + kube-state-metrics + node-exporter)
+#
+#   helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+#     --version 91.9.0 -n monitoring --create-namespace -f lab/monitoring/values.yaml
+#
+# 접근: http://localhost/prometheus , http://localhost/grafana (ingress-nginx)
+# 노드 3개(각 12GiB)에 이미 ~8GiB 를 쓰고 있어 보존·자원을 작게 잡았다.
+
+# kind 는 etcd·scheduler·controller-manager·kube-proxy 가 127.0.0.1 에만 열려 있어 수집하면 항상 down 이다.
+kubeEtcd: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeProxy: {enabled: false}
+
+prometheus:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [localhost]
+    paths: [/prometheus]
+    pathType: Prefix
+  prometheusSpec:
+    externalUrl: http://localhost/prometheus
+    routePrefix: /prometheus
+    retention: 2d
+    retentionSize: 2GB
+    # 차트 라벨이 없는 ServiceMonitor/PodMonitor 도 수집한다 (앱·fluentd·rabbitmq 지표를 나중에 붙이기 위해)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {memory: 1536Mi}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 128Mi}
+
+grafana:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [localhost]
+    path: /grafana
+    pathType: Prefix
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s/grafana"
+      serve_from_sub_path: true
+  # 하위 경로로 띄우면 /metrics 가 /grafana/metrics 로 리다이렉트돼 수집이 실패한다
+  serviceMonitor:
+    path: /grafana/metrics
+  # admin 비밀번호는 차트가 만든 Secret(monitoring/monitoring-grafana)에 있다. 저장소에 넣지 않는다.
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 384Mi}
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+prometheus-node-exporter:
+  # Docker Desktop 위 kind 는 호스트 루트 마운트 전파(rslave)가 안 돼서 파드가 뜨지 않는다
+  hostRootFsMount: {enabled: false}
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 64Mi}
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
