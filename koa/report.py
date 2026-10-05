@@ -9,8 +9,8 @@ from pathlib import Path
 
 import yaml
 
-REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import CATALOG, CLUSTERS  # noqa: E402
 import plan  # noqa: E402
 
 KIND_KO = {
@@ -125,9 +125,9 @@ def build(profile, catalog, probed=True):
     if ready:
         nxt.append("바로 등록할 수 있다: %s → `python3 koa/plan.py %s --apply`" % (", ".join("`%s`" % it["name"] for it in ready), profile["cluster"]))
     for it in need_cred:
-        envs = [t.split(": ", 1)[1] for t in it["todo"] if t.startswith("~/.hermes/.env")]
+        envs = [t.split(": ", 1)[1] for t in it["todo"] if " 에 값 채우기: " in t]
         hint = [t for t in it["todo"] if "제안값" in t]
-        nxt.append("`%s` — 접속 정보(%s)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다%s. 근거: %s"
+        nxt.append("`%s` — 접속 정보(%s)를 받아 `.env` 에 넣으면 붙일 수 있다%s. 근거: %s"
                    % (it["name"], ", ".join(envs) or "-", (" (" + hint[0] + ")") if hint else "", it["note"].split(".")[0]))
     for it in unreachable:
         why = next((t for t in it["todo"] if "붙일 수 없다" in t), "클러스터 밖 접근 주소가 없어 지금 범위에서는 붙일 수 없다")
@@ -142,9 +142,9 @@ def build(profile, catalog, probed=True):
 def main():
     if len(sys.argv) != 2:
         sys.exit("사용법: python3 koa/report.py <클러스터 이름>")
-    prof = REPO / "clusters" / ("%s.yaml" % sys.argv[1])
+    prof = CLUSTERS / ("%s.yaml" % sys.argv[1])
     profile = yaml.safe_load(prof.read_text())
-    catalog = yaml.safe_load((REPO / "koa" / "catalog.yaml").read_text())
+    catalog = yaml.safe_load(CATALOG.read_text())
     md = build(profile, catalog)
     out = prof.with_suffix(".report.md")
     out.write_text(md)

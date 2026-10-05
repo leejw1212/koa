@@ -7,7 +7,7 @@ KOA 관찰 계층(K8s + OpenSearch)을 Hermes에 붙이는 절차. **이 저장�
 
 | 항목 | 값 |
 |---|---|
-| Hermes | v0.21.5 (데스크톱), 설정은 이 저장소 `config.yaml` → `~/.hermes/config.yaml` 심볼릭 링크 |
+| Hermes | v0.21.5 (데스크톱). KOA 는 profile distribution 으로 설치 → `~/.hermes/profiles/koa/` (2026-10-05 전에는 `install.sh` + 심볼릭 링크) |
 | K8s MCP | **flux159 [`mcp-server-kubernetes`](https://www.npmjs.com/package/mcp-server-kubernetes) v4.1.9** (`npx`) |
 | K8s MCP 서버 모드 | `ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS=true` |
 | K8s 노출 도구 | `kubectl_get`, `kubectl_describe`, `kubectl_logs`, `explain_resource` (4개) |
@@ -16,7 +16,7 @@ KOA 관찰 계층(K8s + OpenSearch)을 Hermes에 붙이는 절차. **이 저장�
 | OpenSearch MCP | [`opensearch-mcp-server-py`](https://pypi.org/project/opensearch-mcp-server-py/) v0.11.0 (`uvx`), 서버 OpenSearch 3.8.0 |
 | OpenSearch 접속 | Ingress + Basic Auth, 계정 `hermes-readonly`, `OPENSEARCH_SETTINGS_ALLOW_WRITE=false` |
 | OpenSearch 노출 도구 | `ListIndexTool`, `IndexMappingTool`, `SearchIndexTool`, `GetShardsTool`, `ClusterHealthTool` (5개) |
-| 비밀 값 | `~/.hermes/.env` (600). `config.yaml`에는 `${VAR}`만 쓴다 |
+| 비밀 값 | 프로필의 `.env` (`~/.hermes/profiles/koa/.env`, 600). `config.yaml`에는 `${VAR}`만 쓴다 |
 | 테스트 클러스터 | kind 3노드 `kind-lab` (v1.37.0) |
 
 > 초안과 달라진 점
@@ -30,16 +30,18 @@ KOA 관찰 계층(K8s + OpenSearch)을 Hermes에 붙이는 절차. **이 저장�
 ## 0. 설치
 
 ```bash
-git clone git@github.com:leejw1212/koa.git ~/hermes-config
-~/hermes-config/install.sh          # config.yaml 링크 + ~/.hermes/.env 생성
+hermes profile install github.com/leejw1212/koa --alias   # → ~/.hermes/profiles/koa, 명령 `koa`
 ```
+
+MCP 는 이 가이드처럼 손으로 넣지 않고, KOA 프로필에서 "클러스터 확인하고 MCP 세팅해줘" 로 온보딩한다
+(스킬 `koa-cluster-discovery`, 정의는 `koa/catalog.yaml`). 아래 절들은 그 정의가 어떻게 정해졌는지의 기록이다.
 
 필요한 것: Node.js(`npx`), `uv`(`uvx`), `kubectl`, 클러스터 관리자 컨텍스트(SA 생성용 1회).
 
 ## 1. 읽기 전용 ServiceAccount + kubeconfig
 
 ```bash
-~/hermes-config/k8s/make-readonly-kubeconfig.sh kind-lab   # 관리자 컨텍스트 지정
+~/.hermes/profiles/koa/k8s/make-readonly-kubeconfig.sh kind-lab   # 관리자 컨텍스트 지정
 ```
 
 - `k8s/hermes-readonly.yaml`을 적용한다: ns `hermes`, SA `hermes-readonly`, 토큰 Secret, `view` 바인딩, 클러스터 리소스 조회 Role.
@@ -164,7 +166,7 @@ terminal:
     - ~/.profile          # 목록을 명시하면 기본 자동 source 가 꺼지므로 기본 3개를 함께 적는다
     - ~/.bash_profile
     - ~/.bashrc
-    - ~/hermes-config/terminal/agent-env.sh   # export KUBECONFIG=$HOME/.kube/hermes-readonly.yaml
+    - ~/.hermes/profiles/koa/terminal/agent-env.sh   # export KUBECONFIG=$HOME/.kube/hermes-readonly.yaml
 ```
 
 - 세션 시작 시 터미널 환경 스냅샷을 만들 때 source 된다 → **새 채팅부터** 적용, 진행 중인 채팅은 그대로.

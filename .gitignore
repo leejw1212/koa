@@ -1,4 +1,40 @@
+# Credentials & secrets — NEVER commit
+auth.json
 .env
 *.env
-!.env.example
+.env.EXAMPLE
+
+# Runtime databases & state (when the repo is used as a profile dir)
+state.db
+state.db-shm
+state.db-wal
+hermes_state.db
+response_store.db*
+gateway.pid
+gateway_state.json
+processes.json
+auth.lock
+active_profile
+.update_check
+
+# User data — NEVER commit
+memories/
+sessions/
+logs/
+plans/
+workspace/
+home/
+local/
+
+# Caches
+*_cache/
+cache/
+checkpoints/
+sandboxes/
+backups/
+errors.log
+.hermes_history
+skills/.*
+
 .DS_Store
+__pycache__/

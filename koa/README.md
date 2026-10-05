@@ -2,10 +2,14 @@
 
 클러스터를 연결하면 KOA 가 처음 하는 일. 무엇이 있는지 훑어 **클러스터 프로필**을 만들고, 그걸 보고 붙일 MCP 서버를 정한다.
 
+보통은 KOA 프로필에서 "클러스터 확인하고 MCP 세팅해줘" 라고 하면 에이전트가 스킬 `koa-cluster-discovery` 를 따라 아래를 돌린다.
+
 ```bash
-python3 koa/discover.py --probe      # 1) clusters/<이름>.yaml + 결과 표·제안 보고서 clusters/<이름>.report.md
+cd "$HERMES_HOME"                    # 설치본 ~/.hermes/profiles/koa, 개발은 저장소 루트
+python3 koa/discover.py --probe      # 1) 프로필 <이름>.yaml + 결과 표·제안 보고서 <이름>.report.md
 python3 koa/plan.py <이름>           # 2) 설치 계획 (아무것도 바꾸지 않음)
-python3 koa/plan.py <이름> --apply   # 3) 준비된 verified 서버를 Hermes 에 등록 → 앱 재시작 → git commit
+python3 koa/plan.py <이름> --apply   # 3) 준비된 verified 서버를 이 프로필에 등록 → 앱 재시작
+python3 koa/check_mcp.py <MCP...>    # 4) 서버를 직접 띄워 실제 도구 목록·쓰기 도구 확인
 python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
 ```
 
@@ -24,7 +28,9 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `discover.py` | 읽기 전용 kubeconfig 로 클러스터를 훑어 프로필을 쓴다 |
 | `catalog.yaml` | 무엇을 찾을지(구성요소 감지 규칙)와 찾으면 어떤 MCP 를 붙일지(서버 정의) |
 | `plan.py` | 프로필 + 카탈로그 → 설치 계획. `--apply` 는 `hermes config set mcp_servers.<이름>` 으로 등록 |
-| `../clusters/<이름>.yaml` | 클러스터 프로필. 우리만의 형식(`koa.cluster-profile/v1`). 자동 생성, 직접 고치지 않는다 |
+| `check_mcp.py` | MCP 서버를 stdio 로 띄워 실제 도구 목록과 `include` 비교 |
+| `paths.py` | 경로 판별: 설치본이면 프로필 폴더(`.env`, `config.yaml`, 결과는 `local/clusters/`), 개발 체크아웃이면 저장소 `clusters/` + `HERMES_HOME` |
+| `<결과>/<이름>.yaml` | 클러스터 프로필. 우리만의 형식(`koa.cluster-profile/v1`). 자동 생성, 직접 고치지 않는다 |
 
 ## 프로필에 들어가는 것
 

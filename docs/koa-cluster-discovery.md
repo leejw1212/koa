@@ -43,15 +43,17 @@ hermes-config/
 
 ## 3. 사용법
 
+보통은 KOA 프로필에서 "클러스터 확인하고 MCP 세팅해줘" 라고 하면 에이전트가 아래를 순서대로 돌린다 (14절).
+
 ```bash
-cd ~/hermes-config
-python3 koa/discover.py --probe        # 1) 탐색 → clusters/kind-lab.yaml (약 1.4초)
+cd "$HERMES_HOME"                       # 설치본: ~/.hermes/profiles/koa, 개발: 저장소 루트
+python3 koa/discover.py --probe        # 1) 탐색 → local/clusters/kind-lab.yaml (개발 체크아웃은 clusters/)
 python3 koa/plan.py kind-lab           # 2) 계획만 보여준다. 아무것도 바꾸지 않는다
 python3 koa/plan.py kind-lab --apply   # 3) verified 서버 등록
 python3 koa/plan.py kind-lab --apply --with argocd   # candidate 는 이름을 명시해야 등록
 ```
 
-등록 후: 데스크톱 앱 재시작(게이트웨이를 쓰면 `~/.local/bin/hermes gateway restart` 도) → `git diff config.yaml` → 커밋.
+등록 후: 데스크톱 앱 재시작(게이트웨이를 쓰면 `~/.local/bin/hermes gateway restart` 도).
 
 `discover.py` 옵션
 
@@ -318,6 +320,33 @@ argoproj-labs `argocd-mcp` 대신 쓸 서버를 찾았다. 조건: 하위 경로
 - `list_applications` → 앱 3개, `get_application_status`·`diagnose_sync_failure` 정상.
 - `sync_application`(dry_run) 을 일부러 호출 → `OPERATION BLOCKED: ... read-only mode`. Argo CD 서버 로그에 쓰기 요청 없음.
 - 방어선 3겹: `include`(도구 숨김) → `MCP_READ_ONLY`(서버가 거부) → `role:readonly` 토큰(Argo CD 가 거부).
+
+## 14. 배포: Hermes profile distribution (2026-10-05)
+
+목표: 어느 장비에서든 저장소를 받아 "클러스터 확인하고, 리스트 정리해서, 사용자와 MCP 세팅해" 라고만 하면 되게.
+그동안 이 동작은 기본 프로필의 **메모리 + 로컬 스킬** 에 기대고 있었다. 둘 다 저장소에 없어서 다른 장비에서는 재현되지 않았다.
+
+| 지식 | 전 | 후 |
+|---|---|---|
+| 항상 지키는 규칙 (클러스터 무변경, 읽기 전용, 토큰은 사용자에게) | 기본 프로필 메모리 | `SOUL.md` — 모든 대화의 시스템 프롬프트 |
+| 작업 절차 (온보딩, 장애 분석, MCP 연결, 접근 권한) | `~/.hermes/skills/devops/` (저장소 밖) | 저장소 `skills/devops/` 4개 |
+| 설정 | `config.yaml` 심볼릭 링크 + `install.sh` | `config.yaml` (MCP 는 비움 — 클러스터마다 온보딩) |
+| 경로 | `~/hermes-config`, `~/.hermes/.env` 하드코딩 | `koa/paths.py` 가 설치본/개발 체크아웃을 판별 |
+
+- 설치: `hermes profile install github.com/leejw1212/koa --alias` → 프로필 `koa`. 메모리·세션·`.env`·`local/` 은 업데이트해도 유지된다.
+- 메모리는 Hermes 설계상 배포에 포함되지 않는다. 그래서 메모에 있던 KOA 규칙을 `SOUL.md` 로 옮겼다.
+- 탐색 결과는 설치본에서 `local/clusters/` 에 쓴다 (`hermes profile update` 가 건드리지 않는 사용자 영역).
+- `lab/`(kind-lab 관리자 스크립트)와 `clusters/`(개발용 결과)는 `distribution_owned` 에서 빼서 설치본에 들어가지 않는다.
+- 이 장비의 기본 프로필은 개발용: `skills.external_dirs: [~/hermes-config/skills]` 로 저장소 스킬을 직접 읽는다 (사본 없음).
+
+설치 검증 (로컬 디렉터리로 `koa-test` 설치)
+
+| 항목 | 결과 |
+|---|---|
+| 복사된 것 | `SOUL.md`, `config.yaml`, `skills/`(4), `koa/`, `k8s/`, `terminal/`, `docs/`, `README.md`, `.env.EXAMPLE` |
+| 복사 안 된 것 | `.env`, `clusters/`, `lab/` |
+| 스킬 | `hermes -p koa-test skills list` → 4개 local, enabled |
+| 경로 판별 | 설치본 인식, 결과 경로 `profiles/koa-test/local/clusters`, `.env` 는 프로필 것 |
 
 ## 13. 다음 단계
 

@@ -25,8 +25,8 @@ from pathlib import Path
 
 import yaml
 
-REPO = Path(__file__).resolve().parent.parent
-CATALOG = REPO / "koa" / "catalog.yaml"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import CATALOG, CLUSTERS  # noqa: E402
 DEFAULT_KUBECONFIG = Path.home() / ".kube" / "hermes-readonly.yaml"
 
 # 원인 분석에 필요한 읽기 권한과, 읽기 전용 계정이라면 막혀 있어야 하는 권한
@@ -405,13 +405,12 @@ def main():
 
     name = a.name or re.sub(r"-readonly$", "", profile["kubeconfig"]["context"])
     profile = {"cluster": name, **profile}
-    out = Path(a.out) if a.out else REPO / "clusters" / ("%s.yaml" % name)
+    out = Path(a.out) if a.out else CLUSTERS / ("%s.yaml" % name)
     out.parent.mkdir(parents=True, exist_ok=True)
     header = "# KOA 클러스터 프로필 — koa/discover.py 가 만든 파일. 직접 고치지 말고 다시 실행한다.\n"
     out.write_text(header + yaml.safe_dump(profile, sort_keys=False, allow_unicode=True, width=200))
 
     # 결과 표 + 제안 보고서
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     import report
     md = report.build(profile, catalog, probed=a.probe)
     rep = out.with_suffix(".report.md")

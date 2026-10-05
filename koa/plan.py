@@ -6,7 +6,7 @@
   python3 koa/plan.py kind-lab --apply --with prometheus   # candidate 도 명시해서 등록
 
 등록은 `hermes config set mcp_servers.<이름> '<json>'` 으로 한다 → config.yaml(이 저장소) 이 바뀐다.
-비밀 값은 ~/.hermes/.env 에서 "있는지"만 확인하고 내용은 읽어 출력하지 않는다.
+비밀 값은 HERMES_HOME/.env 에서 "있는지"만 확인하고 내용은 읽어 출력하지 않는다.
 """
 import argparse
 import json
@@ -18,24 +18,17 @@ from urllib.parse import urlparse
 
 import yaml
 
-REPO = Path(__file__).resolve().parent.parent
-CATALOG = REPO / "koa" / "catalog.yaml"
-CONFIG = REPO / "config.yaml"
-HERMES_HOME = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
-HERMES_BIN = Path.home() / ".local" / "bin" / "hermes"  # 다른 설치본의 hermes 를 쓰면 게이트웨이 서비스 정의가 깨진다
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import CATALOG, CLUSTERS, CONFIG, ENV_HINT, HERMES_BIN, INSTALLED, hermes_env, read_env  # noqa: E402
 
 
 def env_keys_set():
-    """~/.hermes/.env 와 현재 환경에서 값이 비어 있지 않은 변수 이름만 돌려준다."""
-    keys = {k for k, v in os.environ.items() if v}
-    f = HERMES_HOME / ".env"
-    if f.exists():
-        for line in f.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                if v.strip().strip('"').strip("'"):
-                    keys.add(k.strip().removeprefix("export ").strip())
+    """값이 비어 있지 않은 변수 이름만 돌려준다.
+    설치본은 프로필 .env 만 본다: 에이전트 터미널은 다른 프로필(.env)의 값을 환경변수로 물려받을 수 있어서,
+    환경변수까지 보면 이 프로필에 없는 토큰을 '있다'고 착각한다."""
+    keys = {k for k, v in read_env().items() if v}
+    if not INSTALLED:
+        keys |= {k for k, v in os.environ.items() if v}
     return keys
 
 
@@ -64,7 +57,7 @@ def build_plan(profile, catalog, with_names):
         item = {"name": name, "status": m["status"], "why": why, "note": m.get("note", ""), "server": m["server"], "todo": []}
         missing = [e for e in m.get("requires_env", []) if e not in have_env]
         if missing:
-            item["todo"].append("~/.hermes/.env 에 값 채우기: %s" % ", ".join(missing))
+            item["todo"].append("%s 에 값 채우기: %s" % (ENV_HINT, ", ".join(missing)))
         if cond != "k8s_read":
             urls = access_urls(profile, cond.split(":", 1)[1])
             if urls and m.get("url_env") in missing:
@@ -95,7 +88,7 @@ def build_plan(profile, catalog, with_names):
 
 def apply(item):
     cmd = [str(HERMES_BIN), "config", "set", "mcp_servers.%s" % item["name"], json.dumps(item["server"], ensure_ascii=False)]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=hermes_env())
     if p.returncode != 0:
         raise SystemExit("등록 실패 %s: %s" % (item["name"], (p.stderr or p.stdout).strip()[:300]))
 
@@ -107,7 +100,7 @@ def main():
     ap.add_argument("--with", dest="with_names", default="", help="함께 등록할 candidate 이름 (쉼표 구분)")
     a = ap.parse_args()
 
-    prof_path = REPO / "clusters" / ("%s.yaml" % a.cluster)
+    prof_path = CLUSTERS / ("%s.yaml" % a.cluster)
     if not prof_path.exists():
         sys.exit("%s 없음 → 먼저 python3 koa/discover.py 실행" % prof_path)
     profile = yaml.safe_load(prof_path.read_text())
@@ -146,7 +139,7 @@ def main():
     for it in todo:
         apply(it)
         print("등록: mcp_servers.%s" % it["name"])
-    print("\n완료. 데스크톱 앱 재시작 (게이트웨이를 쓰면 ~/.local/bin/hermes gateway restart 도). 그다음 git commit.")
+    print("\n완료 (%s). 데스크톱 앱 재시작 (게이트웨이를 쓰면 ~/.local/bin/hermes gateway restart 도)." % CONFIG)
 
 
 if __name__ == "__main__":

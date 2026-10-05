@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """verified 로 올리기 전 점검: config.yaml 의 MCP 서버를 Hermes 와 같은 방식(stdio)으로 직접 띄워 tools/list 를 받는다.
-include 목록과 실제 도구 이름을 비교한다. ${VAR} 는 ~/.hermes/.env 로 채운다(값은 출력하지 않음)."""
+include 목록과 실제 도구 이름을 비교한다. ${VAR} 는 HERMES_HOME/.env 로 채운다(값은 출력하지 않음)."""
 import json, os, re, select, subprocess, sys, time
 from pathlib import Path
 import yaml
 
-HOME = Path.home()
-env_file = {}
-for l in (HOME / ".hermes" / ".env").read_text().splitlines():
-    if "=" in l and not l.lstrip().startswith("#"):
-        k, v = l.split("=", 1); env_file[k.strip()] = v.strip()
-subst = {"userHome": str(HOME), **env_file}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import CONFIG, read_env  # noqa: E402
+
+subst = {"userHome": str(Path.home()), **read_env()}
 expand = lambda s: re.sub(r"\$\{(\w+)\}", lambda m: subst.get(m.group(1), ""), str(s))
 
-cfg = yaml.safe_load((HOME / "hermes-config" / "config.yaml").read_text())["mcp_servers"]
+cfg = yaml.safe_load(CONFIG.read_text())["mcp_servers"]
 names = sys.argv[1:] or list(cfg)
 
 

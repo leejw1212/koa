@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""~/.hermes/.env 의 토큰으로 읽기는 되고 쓰기는 거부되는지 확인한다. 토큰은 출력하지 않는다.
+"""HERMES_HOME/.env 의 토큰으로 읽기는 되고 쓰기는 거부되는지 확인한다. 토큰은 출력하지 않는다.
 Argo CD 쓰기는 실제로 시도하지 않고 can-i API 로 묻는다 (권한이 새고 있어도 아무것도 바뀌지 않게)."""
-import json, urllib.request, urllib.error
+import json, sys, urllib.request, urllib.error
 from pathlib import Path
 
-env = {}
-for l in (Path.home() / ".hermes" / ".env").read_text().splitlines():
-    if "=" in l and not l.lstrip().startswith("#"):
-        k, v = l.split("=", 1); env[k.strip()] = v.strip()
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "koa"))
+from paths import read_env  # noqa: E402
+
+env = read_env()
 
 
 def req(method, url, token=None, body=None):

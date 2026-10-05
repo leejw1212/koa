@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""kind-lab 테스트용: Argo CD·Grafana 읽기 전용 토큰을 발급해 ~/.hermes/.env 에 넣는다. 토큰은 출력하지 않는다."""
+"""kind-lab 테스트용: Argo CD·Grafana 읽기 전용 토큰을 발급해 HERMES_HOME/.env 에 넣는다. 토큰은 출력하지 않는다."""
 import base64, json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
 
-ENV = Path.home() / ".hermes" / ".env"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "koa"))
+from paths import ENV_FILE as ENV  # noqa: E402
 K = ["kubectl", "--kubeconfig", str(Path.home() / ".kube" / "config"), "--context", "kind-lab"]
 
 
