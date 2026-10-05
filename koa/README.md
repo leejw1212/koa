@@ -3,10 +3,15 @@
 클러스터를 연결하면 KOA 가 처음 하는 일. 무엇이 있는지 훑어 **클러스터 프로필**을 만들고, 그걸 보고 붙일 MCP 서버를 정한다.
 
 ```bash
-python3 koa/discover.py --probe      # 1) clusters/<이름>.yaml 생성
+python3 koa/discover.py --probe      # 1) clusters/<이름>.yaml + 결과 표·제안 보고서 clusters/<이름>.report.md
 python3 koa/plan.py <이름>           # 2) 설치 계획 (아무것도 바꾸지 않음)
 python3 koa/plan.py <이름> --apply   # 3) 준비된 verified 서버를 Hermes 에 등록 → 앱 재시작 → git commit
+python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
 ```
+
+보고서는 네 부분이다: ① 찾은 구성요소 표(접근 주소·probe·Prometheus 수집 여부) ② 붙일 수 있는 MCP 표
+③ 빈 곳과 제안(우선순위·영향·누가 할 일인지·구체적 방법) ④ 다음 단계. 제안 문구는 `catalog.yaml` 의
+`gap_advice`(빈 곳별)와 구성요소의 `metrics_hint`/`access_hint` 에서 온다.
 
 필요: `kubectl`, `python3` + PyYAML, 읽기 전용 kubeconfig(`~/.kube/hermes-readonly.yaml`, 만드는 법은 루트 README).
 

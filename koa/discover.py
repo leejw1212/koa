@@ -291,35 +291,51 @@ def discover(kube, catalog, do_probe):
         events["ttl"] = flag or "1h"
         events["ttl_source"] = "kube-apiserver --event-ttl" if flag else "kube-apiserver 기본값 (--event-ttl 없음)"
 
-    # ── 빈 곳 ─────────────────────────────────────────────
+    # ── Prometheus 수집 범위 (--probe 이고 인증 없이 열려 있을 때만) ─────────
+    coverage = metrics_coverage(components) if do_probe else None
+
+    # ── 빈 곳: id 는 catalog.yaml 의 gap_advice 와 짝이다 (report.py 가 제안으로 바꾼다) ──
     kinds = {c["kind"] for c in components.values()}
     gaps = []
+
+    def gap(gid, detail):
+        gaps.append({"id": gid, "detail": detail})
+
     if not kinds & {"metrics"}:
-        gaps.append("지표 저장소 없음 → '언제부터·얼마나' 추세, 큐 적체, 처리량을 볼 수 없다")
+        gap("no-metrics", "지표 저장소 없음 → '언제부터·얼마나' 추세, 큐 적체, 처리량을 볼 수 없다")
     if not kinds & {"logs"}:
-        gaps.append("로그 저장소 없음 → kubectl logs 만 가능, 재시작 전·삭제된 파드 로그는 볼 수 없다")
+        gap("no-logs", "로그 저장소 없음 → kubectl logs 만 가능, 재시작 전·삭제된 파드 로그는 볼 수 없다")
     elif not kinds & {"log-shipper", "telemetry-collector"}:
-        gaps.append("로그 저장소는 있지만 수집기를 찾지 못함 → 어떤 로그가 들어가는지 확인 필요")
-    if kinds & {"log-shipper"}:
-        gaps.append("로그 수집기 자체 상태(버퍼·재시도·heartbeat)를 볼 신호가 있는지 확인 필요 → '로그 없음'과 '수집 중단'을 구분하기 위해")
+        gap("no-shipper", "로그 저장소는 있지만 수집기를 찾지 못함 → 어떤 로그가 들어가는지 확인 필요")
+    shippers = sorted(n for n, c in components.items() if c["kind"] == "log-shipper")
+    if shippers:
+        scraped = [n for n in shippers if any(i.get("scraped") for i in components[n]["instances"])]
+        if not scraped:
+            gap("shipper-health", "%s 자체 상태(버퍼·재시도·처리량)를 보는 신호 없음 → '로그 없음'과 '수집 중단'을 구분할 수 없다" % ", ".join(shippers))
     if ttl_sec is not None:
         if ttl_sec < 6 * 3600:
-            gaps.append("k8s 이벤트 보존이 짧음(%s, %s) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다" % (events["ttl"], events["ttl_source"]))
+            gap("short-event-ttl", "k8s 이벤트 보존 %s (%s) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다" % (events["ttl"], events["ttl_source"]))
     elif not stamps or (now - min(stamps)).total_seconds() < 6 * 3600:
-        gaps.append("k8s 이벤트 보존 기간 미확인(API 서버 설정을 볼 수 없음, 남은 가장 오래된 이벤트 %s) → 관리형은 보통 1h" % events.get("oldest_age", "없음"))
+        gap("event-ttl-unknown", "k8s 이벤트 보존 기간 미확인 (API 서버 설정이 안 보임, 남은 가장 오래된 이벤트 %s). 관리형은 보통 1h" % events.get("oldest_age", "없음"))
     if not kinds & {"gitops"}:
-        gaps.append("GitOps 없음 → 변경 이력은 ReplicaSet revision·생성 시각으로만 복원")
+        gap("no-gitops", "GitOps 없음 → 변경 이력은 ReplicaSet revision·생성 시각으로만 복원")
     if not metrics_api:
-        gaps.append("metrics API 없음 → 지금 CPU·메모리 사용량 조회 불가")
+        gap("no-metrics-api", "metrics API(metrics-server) 없음 → kubectl top 불가")
     if not kinds & {"traces"}:
-        gaps.append("트레이스 없음 → 서비스 간 어느 구간에서 느려지는지는 로그의 request_id 로만 추적")
+        gap("no-traces", "트레이스 없음 → 서비스 간 어느 구간에서 느려지는지는 로그의 request_id 로만 추적")
     if not kinds & {"alerting"}:
-        gaps.append("경보 시스템 없음 → 장애를 먼저 알려줄 신호가 없다")
+        gap("no-alerting", "경보 시스템 없음 → 장애를 먼저 알려줄 신호가 없다")
     no_access = sorted(n for n, c in components.items()
                        if c["kind"] in ("metrics", "logs", "dashboard", "gitops", "message-queue", "alerting")
                        and c["instances"] and not any(i["access"] for i in c["instances"]))
     if no_access:
-        gaps.append("클러스터 밖 접근 주소 없음: %s → MCP 를 붙이려면 Ingress 등으로 열어야 한다 (읽기 전용 SA 는 port-forward 불가)" % ", ".join(no_access))
+        gap("no-access", "클러스터 밖 접근 주소 없음: %s" % ", ".join(no_access))
+    if coverage:
+        missing = sorted(n for n, c in components.items()
+                         if c["instances"] and not any(i.get("scraped") for i in c["instances"]))
+        coverage["not_scraped"] = missing
+        if missing:
+            gap("not-scraped", "Prometheus 가 수집하지 않는 구성요소: %s" % ", ".join(missing))
 
     return {
         "schema": "koa.cluster-profile/v1",
@@ -337,30 +353,38 @@ def discover(kube, catalog, do_probe):
         "access": {"can": can, "cannot": cannot, "read_only": not leaked},
         "apis": {"metrics_api": metrics_api},
         "components": components,
+        "metrics_coverage": coverage,
         "events": events,
         "gaps": gaps,
     }
 
 
-def summary(p):
-    out = []
-    k = p["kubernetes"]
-    out.append("클러스터 %s  (%s, 노드 %d/%d Ready, 파드 %d)" % (p["kubeconfig"]["context"], k["version"], k["nodes"]["ready"], k["nodes"]["total"], k["pods"]))
-    out.append("계정 %s  읽기전용=%s" % (p["kubeconfig"]["identity"], p["access"]["read_only"]))
-    for w in p["warnings"] or []:
-        out.append("경고: " + w)
-    out.append("\n구성요소")
-    for name, c in p["components"].items():
-        insts = c["instances"]
-        where = ", ".join("%s/%s" % (i["namespace"], i["workload"].split("/", 1)[1]) for i in insts) or "(CRD 만)"
-        acc = sorted({a for i in insts for a in (i["access"] or [])})
-        out.append("  %-18s %-20s %s%s" % (name, c["kind"], where, ("  → " + ", ".join(acc)) if acc else ""))
-        for i in insts:
-            for pr in i.get("probe", []):
-                out.append("  %18s probe %s → %s" % ("", pr["url"], pr.get("http_status", pr.get("error"))))
-    out.append("\n빈 곳")
-    out += ["  - " + g for g in p["gaps"]]
-    return "\n".join(out)
+def metrics_coverage(components):
+    """인증 없이 열린 Prometheus 가 있으면 수집 대상 목록을 읽어, 구성요소마다 수집되는지(scraped) 표시한다."""
+    prom = components.get("prometheus") or {}
+    for inst in prom.get("instances", []):
+        for pr in inst.get("probe", []):
+            if not pr.get("reachable") or pr.get("auth_required") or pr.get("http_status") != 200:
+                continue
+            base = pr["url"].rsplit("/-/", 1)[0]
+            try:
+                req = urllib.request.Request(base + "/api/v1/targets?state=active", headers={"User-Agent": "koa-discover"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    targets = json.load(r)["data"]["activeTargets"]
+            except Exception:
+                continue
+            labels = [t.get("labels", {}) for t in targets]
+            for c in components.values():
+                for i in c["instances"]:
+                    svcs = {s.split(" ", 1)[0] for s in i.get("services", [])}
+                    wl = i["workload"].split("/", 1)[1]
+                    i["scraped"] = any(
+                        l.get("namespace") == i["namespace"]
+                        and (l.get("service") in svcs or (l.get("pod") or "").startswith(wl + "-"))
+                        for l in labels)
+            return {"source": base, "targets": len(targets),
+                    "up": sum(1 for t in targets if t.get("health") == "up")}
+    return None
 
 
 def main():
@@ -385,8 +409,15 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     header = "# KOA 클러스터 프로필 — koa/discover.py 가 만든 파일. 직접 고치지 말고 다시 실행한다.\n"
     out.write_text(header + yaml.safe_dump(profile, sort_keys=False, allow_unicode=True, width=200))
-    print(summary(profile))
-    print("\n저장: %s\n다음: python3 koa/plan.py %s" % (out, name))
+
+    # 결과 표 + 제안 보고서
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import report
+    md = report.build(profile, catalog, probed=a.probe)
+    rep = out.with_suffix(".report.md")
+    rep.write_text(md)
+    print(md)
+    print("\n---\n프로필: %s\n보고서: %s" % (out, rep))
 
 
 if __name__ == "__main__":

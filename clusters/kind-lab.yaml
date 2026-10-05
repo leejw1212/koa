@@ -1,7 +1,7 @@
 # KOA 클러스터 프로필 — koa/discover.py 가 만든 파일. 직접 고치지 말고 다시 실행한다.
 cluster: kind-lab
 schema: koa.cluster-profile/v1
-discovered_at: '2026-10-05T02:26:45Z'
+discovered_at: '2026-10-05T02:33:03Z'
 kubeconfig:
   context: kind-lab-readonly
   identity: system:serviceaccount:hermes:hermes-readonly
@@ -56,6 +56,7 @@ components:
       - monitoring-kube-prometheus-alertmanager (http-web:9093, reloader-web:8080)
       access: null
       detected_by: image
+      scraped: true
   argocd:
     kind: gitops
     instances:
@@ -68,6 +69,7 @@ components:
       - argocd-metrics (metrics:8082)
       access: null
       detected_by: image
+      scraped: false
     - namespace: argocd
       workload: Deployment/argocd-applicationset-controller
       image: argoproj/argocd:v3.5.2
@@ -77,6 +79,7 @@ components:
       - argocd-applicationset-controller (webhook:7000, metrics:8080)
       access: null
       detected_by: image
+      scraped: false
     - namespace: argocd
       workload: Deployment/argocd-notifications-controller
       image: argoproj/argocd:v3.5.2
@@ -86,6 +89,7 @@ components:
       - argocd-notifications-controller-metrics (metrics:9001)
       access: null
       detected_by: image
+      scraped: false
     - namespace: argocd
       workload: Deployment/argocd-repo-server
       image: argoproj/argocd:v3.5.2
@@ -95,6 +99,7 @@ components:
       - argocd-repo-server (server:8081, metrics:8084)
       access: null
       detected_by: image
+      scraped: false
     - namespace: argocd
       workload: Deployment/argocd-server
       image: argoproj/argocd:v3.5.2
@@ -111,6 +116,7 @@ components:
         reachable: true
         http_status: 200
         auth_required: false
+      scraped: false
     crd_group:
     - argoproj.io
   fluentd:
@@ -125,6 +131,7 @@ components:
       - fluentd-aggregator (forward:24224)
       access: null
       detected_by: image
+      scraped: false
     - namespace: logging
       workload: DaemonSet/fluentd-forwarder
       image: fluent/fluentd-kubernetes-daemonset:v1.19-debian-opensearch-1
@@ -132,6 +139,7 @@ components:
       ready: 3
       access: null
       detected_by: image
+      scraped: false
   grafana:
     kind: dashboard
     instances:
@@ -150,6 +158,7 @@ components:
         reachable: true
         http_status: 200
         auth_required: false
+      scraped: true
   ingress-nginx:
     kind: ingress
     instances:
@@ -163,6 +172,7 @@ components:
       - ingress-nginx-controller-admission (https-webhook:443)
       access: null
       detected_by: image
+      scraped: false
   kube-state-metrics:
     kind: metrics-exporter
     instances:
@@ -175,6 +185,7 @@ components:
       - monitoring-kube-state-metrics (http:8080)
       access: null
       detected_by: image
+      scraped: true
   node-exporter:
     kind: metrics-exporter
     instances:
@@ -187,6 +198,7 @@ components:
       - monitoring-prometheus-node-exporter (http-metrics:9100)
       access: null
       detected_by: image
+      scraped: true
   opensearch:
     kind: logs
     instances:
@@ -205,6 +217,7 @@ components:
         reachable: true
         http_status: 401
         auth_required: true
+      scraped: false
   prometheus:
     kind: metrics
     instances:
@@ -224,6 +237,7 @@ components:
         reachable: true
         http_status: 200
         auth_required: false
+      scraped: true
     crd_group:
     - monitoring.coreos.com
   rabbitmq:
@@ -238,6 +252,7 @@ components:
       - rabbitmq (amqp:5672, management:15672)
       access: null
       detected_by: image
+      scraped: false
   redis:
     kind: cache
     instances:
@@ -250,6 +265,7 @@ components:
       - argocd-redis (tcp-redis:6379)
       access: null
       detected_by: image
+      scraped: false
     - namespace: linkcard
       workload: StatefulSet/redis
       image: redis:7-alpine
@@ -259,14 +275,33 @@ components:
       - redis (redis:6379)
       access: null
       detected_by: image
+      scraped: false
+metrics_coverage:
+  source: http://localhost/prometheus
+  targets: 22
+  up: 22
+  not_scraped:
+  - argocd
+  - fluentd
+  - ingress-nginx
+  - opensearch
+  - rabbitmq
+  - redis
 events:
   count: 129
-  oldest_age: 10m
+  oldest_age: 16m
   ttl_source: kube-apiserver 기본값 (--event-ttl 없음)
   ttl: 1h
 gaps:
-- 로그 수집기 자체 상태(버퍼·재시도·heartbeat)를 볼 신호가 있는지 확인 필요 → '로그 없음'과 '수집 중단'을 구분하기 위해
-- k8s 이벤트 보존이 짧음(1h, kube-apiserver 기본값 (--event-ttl 없음)) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다
-- metrics API 없음 → 지금 CPU·메모리 사용량 조회 불가
-- 트레이스 없음 → 서비스 간 어느 구간에서 느려지는지는 로그의 request_id 로만 추적
-- '클러스터 밖 접근 주소 없음: alertmanager, rabbitmq → MCP 를 붙이려면 Ingress 등으로 열어야 한다 (읽기 전용 SA 는 port-forward 불가)'
+- id: shipper-health
+  detail: fluentd 자체 상태(버퍼·재시도·처리량)를 보는 신호 없음 → '로그 없음'과 '수집 중단'을 구분할 수 없다
+- id: short-event-ttl
+  detail: k8s 이벤트 보존 1h (kube-apiserver 기본값 (--event-ttl 없음)) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다
+- id: no-metrics-api
+  detail: metrics API(metrics-server) 없음 → kubectl top 불가
+- id: no-traces
+  detail: 트레이스 없음 → 서비스 간 어느 구간에서 느려지는지는 로그의 request_id 로만 추적
+- id: no-access
+  detail: '클러스터 밖 접근 주소 없음: alertmanager, rabbitmq'
+- id: not-scraped
+  detail: 'Prometheus 가 수집하지 않는 구성요소: argocd, fluentd, ingress-nginx, opensearch, rabbitmq, redis'
