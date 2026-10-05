@@ -92,7 +92,9 @@ python3 koa/plan.py kind-lab --apply --with argocd   # candidate 는 이름을 �
 **클러스터 밖 접근 주소**(그 서비스를 가리키는 Ingress), `--probe` 결과(HTTP 상태, 인증 필요 여부).
 
 ### 4.4 이벤트 보존
-남아 있는 k8s 이벤트 수와 가장 오래된 이벤트의 나이. 사실상의 보존 기간이다.
+보존 기간은 kube-apiserver 의 `--event-ttl` 플래그(없으면 기본 1h)로 판단한다. API 서버 파드가 보이지 않는 관리형(EKS/GKE/AKS)은
+"미확인"으로 적고, 참고용으로 남아 있는 이벤트 수와 가장 오래된 이벤트의 나이를 함께 기록한다.
+남은 이벤트 나이만으로 보존 기간을 추정하면 틀린다(8절 버그 3).
 
 ### 4.5 빈 곳(gaps)
 원인 분석에 필요한데 없는 신호를 자동으로 적는다.
@@ -132,7 +134,7 @@ components:
       services: [opensearch (http:9200)]
       access: [http://localhost/opensearch]
       probe: [{url: http://localhost/opensearch/, reachable: true, http_status: 401, auth_required: true}]
-events: {count: 3, oldest_age: 19m}
+events: {count: 3, oldest_age: 11.1h, ttl_source: kube-apiserver 기본값 (--event-ttl 없음), ttl: 1h}
 gaps: [...]
 ```
 
@@ -193,7 +195,7 @@ gaps: [...]
 
 - 지표 저장소 없음 → 추세, 큐 적체, 처리량을 볼 수 없다
 - 로그 수집기 자체 상태를 볼 신호 확인 필요
-- k8s 이벤트 보존 약 20분
+- k8s 이벤트 보존 1h (kube-apiserver 기본값)
 - metrics API 없음
 - 트레이스 없음, 경보 시스템 없음
 - rabbitmq 접근 주소 없음 (읽기 전용 SA 는 port-forward 불가)
@@ -216,6 +218,20 @@ gaps: [...]
    그래서 읽기 전용 계정을 쓰기 가능으로 잘못 판정했다. `pods/log` 같은 서브리소스는 `--subresource` 로 분리해 검사하도록 고쳤다.
 2. **접근 주소 오판** — argocd 처럼 워크로드가 여러 개면, 그중 하나라도 주소가 없을 때 "접근 주소 없음" 으로 표시했다.
    구성요소의 모든 인스턴스에 주소가 없을 때만 표시하도록 고쳤다.
+3. **이벤트 보존 오판** (2026-10-05 재실행에서 발견) — 처음에는 남은 이벤트 중 가장 오래된 것의 나이를 보존 기간으로 봤다.
+   하룻밤 뒤 다시 돌리자 11.1시간 된 이벤트가 남아 있어 "보존 짧음" 항목이 빈 곳에서 사라졌다.
+   실제 설정은 `--event-ttl` 없음, 즉 기본값 1h 다. 1h 가 지난 이벤트가 왜 남았는지는 확인하지 못했다
+   (노트북 절전이나 docker 일시정지로 etcd lease 시간이 멈췄을 가능성).
+   API 서버 플래그를 읽도록 고쳤다.
+
+### 재실행 결과 (2026-10-05)
+
+| 단계 | 결과 |
+|---|---|
+| `discover.py --probe` | 1.2초. 구성요소·접근 주소·probe 결과가 전날과 같음 (클러스터 변화 없음) |
+| `plan.py` | kubernetes·opensearch 유지, argocd·rabbitmq 보류(할 일 안내) |
+| `plan.py --apply` | "등록할 것이 없다", `config.yaml` 변화 없음 |
+| `plan.py --apply --with argocd` | `.env` 값이 없어 등록 안 함 (의도대로) |
 
 ## 9. 안전 장치 요약
 

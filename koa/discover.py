@@ -126,6 +126,14 @@ def parse_ts(s):
         return None
 
 
+def parse_duration(s):
+    """'1h30m', '2h', '45m', '90s' -> 초"""
+    total, units = 0, {"h": 3600, "m": 60, "s": 1}
+    for num, unit in re.findall(r"(\d+(?:\.\d+)?)(h|m|s)", s or ""):
+        total += float(num) * units[unit]
+    return int(total) or None
+
+
 def probe(url):
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": "koa-discover"})
     try:
@@ -268,9 +276,20 @@ def discover(kube, catalog, do_probe):
             if t:
                 stamps.append(t)
                 break
-    events = {"count": len(stamps)}
+    events = {"count": len(stamps)}  # type: dict
     if stamps:
         events["oldest_age"] = age_text((now - min(stamps)).total_seconds())
+    # 보존 기간을 남은 이벤트 나이로 추정하면 틀린다. kind-lab 은 TTL 1h(기본값)인데 11시간 된 이벤트가 남아 있었다
+    # (원인 미확인 — 노트북 절전/docker 일시정지로 etcd lease 시간이 멈췄을 가능성).
+    # API 서버 설정(--event-ttl, 기본 1h)을 볼 수 있으면 그 값을 쓴다. 관리형(EKS/GKE/AKS)은 API 서버 파드가 안 보인다.
+    ttl_sec, events["ttl_source"] = None, "unknown"
+    api = kube.run("get", "pods", "-n", "kube-system", "-l", "component=kube-apiserver", "-o", "json", check=False)
+    if api.returncode == 0 and json.loads(api.stdout).get("items"):
+        cmd = json.loads(api.stdout)["items"][0]["spec"]["containers"][0].get("command", [])
+        flag = next((c.split("=", 1)[1] for c in cmd if c.startswith("--event-ttl=")), None)
+        ttl_sec = parse_duration(flag) if flag else 3600
+        events["ttl"] = flag or "1h"
+        events["ttl_source"] = "kube-apiserver --event-ttl" if flag else "kube-apiserver 기본값 (--event-ttl 없음)"
 
     # ── 빈 곳 ─────────────────────────────────────────────
     kinds = {c["kind"] for c in components.values()}
@@ -283,8 +302,11 @@ def discover(kube, catalog, do_probe):
         gaps.append("로그 저장소는 있지만 수집기를 찾지 못함 → 어떤 로그가 들어가는지 확인 필요")
     if kinds & {"log-shipper"}:
         gaps.append("로그 수집기 자체 상태(버퍼·재시도·heartbeat)를 볼 신호가 있는지 확인 필요 → '로그 없음'과 '수집 중단'을 구분하기 위해")
-    if not stamps or (now - min(stamps)).total_seconds() < 6 * 3600:
-        gaps.append("k8s 이벤트 보존이 짧음(%s) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다" % events.get("oldest_age", "없음"))
+    if ttl_sec is not None:
+        if ttl_sec < 6 * 3600:
+            gaps.append("k8s 이벤트 보존이 짧음(%s, %s) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다" % (events["ttl"], events["ttl_source"]))
+    elif not stamps or (now - min(stamps)).total_seconds() < 6 * 3600:
+        gaps.append("k8s 이벤트 보존 기간 미확인(API 서버 설정을 볼 수 없음, 남은 가장 오래된 이벤트 %s) → 관리형은 보통 1h" % events.get("oldest_age", "없음"))
     if not kinds & {"gitops"}:
         gaps.append("GitOps 없음 → 변경 이력은 ReplicaSet revision·생성 시각으로만 복원")
     if not metrics_api:

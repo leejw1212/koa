@@ -1,7 +1,7 @@
 # KOA 클러스터 프로필 — koa/discover.py 가 만든 파일. 직접 고치지 말고 다시 실행한다.
 cluster: kind-lab
 schema: koa.cluster-profile/v1
-discovered_at: '2026-10-04T15:20:59Z'
+discovered_at: '2026-10-05T02:06:21Z'
 kubeconfig:
   context: kind-lab-readonly
   identity: system:serviceaccount:hermes:hermes-readonly
@@ -185,11 +185,13 @@ components:
       detected_by: image
 events:
   count: 3
-  oldest_age: 22m
+  oldest_age: 11.1h
+  ttl_source: kube-apiserver 기본값 (--event-ttl 없음)
+  ttl: 1h
 gaps:
 - 지표 저장소 없음 → '언제부터·얼마나' 추세, 큐 적체, 처리량을 볼 수 없다
 - 로그 수집기 자체 상태(버퍼·재시도·heartbeat)를 볼 신호가 있는지 확인 필요 → '로그 없음'과 '수집 중단'을 구분하기 위해
-- k8s 이벤트 보존이 짧음(22m) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다
+- k8s 이벤트 보존이 짧음(1h, kube-apiserver 기본값 (--event-ttl 없음)) → 사후 분석 때 재시작·OOM·스케줄링 이력이 사라진다
 - metrics API 없음 → 지금 CPU·메모리 사용량 조회 불가
 - 트레이스 없음 → 서비스 간 어느 구간에서 느려지는지는 로그의 request_id 로만 추적
 - 경보 시스템 없음 → 장애를 먼저 알려줄 신호가 없다
