@@ -1,7 +1,7 @@
 # KOA 클러스터 프로필 — koa/discover.py 가 만든 파일. 직접 고치지 말고 다시 실행한다.
 cluster: kind-lab
 schema: koa.cluster-profile/v1
-discovered_at: '2026-10-05T02:49:04Z'
+discovered_at: '2026-10-05T02:54:17Z'
 kubeconfig:
   context: kind-lab-readonly
   identity: system:serviceaccount:hermes:hermes-readonly
@@ -289,7 +289,7 @@ metrics_coverage:
   - redis
 events:
   count: 129
-  oldest_age: 32m
+  oldest_age: 37m
   ttl_source: kube-apiserver 기본값 (--event-ttl 없음)
   ttl: 1h
 gaps:

@@ -153,7 +153,7 @@ gaps: [...]
 | opensearch | `opensearch-mcp-server-py@0.11.0` | opensearch 감지 | **verified** | `OPENSEARCH_SETTINGS_ALLOW_WRITE=false`, 조회 도구 5개만, OpenSearch 읽기 전용 역할 |
 | prometheus | `prometheus-mcp-server@1.6.2` | prometheus 감지 | **verified** | PromQL 은 쓰기를 표현할 수 없음, 조회 도구만 |
 | grafana | `mcp-grafana@2.0.0` | grafana 감지 | **verified** | `--disable-write`, Viewer 서비스 계정, 조회 도구 22개만 |
-| argocd | `argocd-mcp@0.9.0` | argocd 감지 | candidate (하위 경로 URL 불가) | `MCP_READ_ONLY=true`, 조회 도구 5개만, get/list role 토큰 |
+| argocd | `peopleforrester/mcp-k8s-observability-argocd-server` @`6ba6d1b` (git) | argocd 감지 | **verified** | `MCP_READ_ONLY=true`, 조회 도구 5개만, get/list role 토큰 |
 | rabbitmq | `amq-mcp-server-rabbitmq@4.0.0` | rabbitmq 감지 | candidate | `--allow-mutative-tools` 없음, read/observability/health 그룹만, monitoring 태그 계정 |
 
 모든 서버에 `prompts: false`, `resources: false` 를 둔다.
@@ -280,7 +280,7 @@ kind-lab 테스트 클러스터라 토큰을 직접 발급했다(실제 클러�
 |---|---|---|---|---|
 | prometheus | 인증 없음 (`PROMETHEUS_URL`) | 조회 200, admin API 는 서버에서 꺼짐 | 6 → 5 (`health_check` 제외) | **verified**, 등록 |
 | grafana | 서비스 계정 `koa-readonly` (Viewer) | 조회 200, 대시보드·폴더 생성 403 | 62 → 22 조회 도구 | **verified**, 등록 |
-| argocd | 로컬 계정 `koa-readonly` (`role:readonly`, apiKey) | 앱 3개 조회, can-i sync·delete·create·update 모두 no | 11 → 5 | **붙일 수 없음** |
+| argocd | 로컬 계정 `koa-readonly` (`role:readonly`, apiKey) | 앱 3개 조회, can-i sync·delete·create·update 모두 no | 11 → 5 | 붙일 수 없음 → **MCP 교체 후 verified** (아래) |
 
 발견한 것
 
@@ -299,6 +299,25 @@ kind-lab 테스트 클러스터라 토큰을 직접 발급했다(실제 클러�
 argocd 토큰은 `.env` 에 남아 있지만 쓰는 MCP 가 없다.
 
 적용: `~/.local/bin/hermes gateway restart` → prometheus·grafana MCP 프로세스가 새로 뜬 것 확인. 데스크톱 앱은 재시작해야 반영된다.
+
+### argocd MCP 교체
+
+argoproj-labs `argocd-mcp` 대신 쓸 서버를 찾았다. 조건: 하위 경로 URL 지원, 토큰 인증(쿠키·브라우저 의존 없음), 읽기 전용 모드, 유지보수 중.
+
+| 후보 | 하위 경로 | 인증 | 읽기 전용 | 판단 |
+|---|---|---|---|---|
+| **peopleforrester/mcp-k8s-observability-argocd-server** (Python, 2026-09) | ✅ `base_url=f"{url}/api/v1"` | API 토큰 | `MCP_READ_ONLY` 기본 true, 파괴 작업 별도 차단 | **채택** |
+| lukleh/mcp-read-only-argocd (PyPI 0.4.1) | ✅ | 브라우저 쿠키(`argocd.token`), 401 때 Chrome 쿠키를 읽어 갱신 | 읽기만 | 제외 — 사람 브라우저 세션에 의존 |
+| jz-wilson/argocd-mcp-lite (npm 0.1.0) | ❌ `new URL(url, baseUrl)` 로 같은 문제 | 토큰 | – | 제외 |
+| denysvitali/argocd-mcp (Go) | – | – | 쓰기 도구 다수, 읽기 전용 모드 미확인 | 제외 |
+
+채택한 서버 검증 결과
+
+- PyPI 에 없어 `uvx --from git+https://...@6ba6d1b` 로 **커밋 고정**.
+- 도구 15개(읽기 9, 쓰기 4, 파괴 2) → 읽기 9개만 `include`. 쓰기 도구는 목록에 남지만 `MCP_READ_ONLY=true` 면 실행 시 거부된다.
+- `list_applications` → 앱 3개, `get_application_status`·`diagnose_sync_failure` 정상.
+- `sync_application`(dry_run) 을 일부러 호출 → `OPERATION BLOCKED: ... read-only mode`. Argo CD 서버 로그에 쓰기 요청 없음.
+- 방어선 3겹: `include`(도구 숨김) → `MCP_READ_ONLY`(서버가 거부) → `role:readonly` 토큰(Argo CD 가 거부).
 
 ## 13. 다음 단계
 

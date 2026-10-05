@@ -1,6 +1,6 @@
 # KOA 탐색 결과 — kind-lab
 
-> 2026-10-05T02:49:04Z · 계정 `system:serviceaccount:hermes:hermes-readonly` · 읽기 전용 ✅
+> 2026-10-05T02:54:17Z · 계정 `system:serviceaccount:hermes:hermes-readonly` · 읽기 전용 ✅
 
 | 항목 | 값 |
 |---|---|
@@ -38,7 +38,7 @@
 | opensearch | verified | opensearch 감지 | 등록됨 (동일) | 유지 | - |
 | prometheus | verified | prometheus 감지 | 등록됨 (동일) | 유지 | - |
 | grafana | verified | grafana 감지 | 등록됨 (동일) | 유지 | - |
-| argocd | candidate | argocd 감지 | 미등록 | 보류 | 접근 주소가 하위 경로(http://localhost/argocd)인데 이 MCP 는 경로를 버리고 호스트 루트로 요청한다 → 지금 범위에서는 붙일 수 없다 |
+| argocd | verified | argocd 감지 | 등록됨 (동일) | 유지 | - |
 | rabbitmq | candidate | rabbitmq 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: RABBITMQ_MANAGEMENT_ENDPOINT; 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정) |
 | fluentd | - | fluentd 감지 | - | 붙이지 않음 | 전용 MCP 없음 → kubernetes MCP 로 파드 로그를 본다 |
 | redis | - | redis 감지 | - | 붙이지 않음 | 카탈로그에 없음 → kubernetes MCP 로 파드 로그를 본다 |
@@ -79,7 +79,7 @@ KOA 는 클러스터 설정을 바꾸지 않는다. 아래는 이 클러스터�
 ### 4. Prometheus 가 수집하지 않는 구성요소
 
 **KOA 대응**
-- `argocd` — argocd MCP 를 붙이면 동기화·헬스 상태를 본다. 읽기 전용 SA 는 Application 리소스 조회 권한이 없어 kubernetes MCP 로는 안 보인다
+- `argocd` — argocd MCP 로 동기화·헬스·diff·이력을 본다 (읽기 전용 SA 는 Application 리소스 조회 권한이 없어 kubernetes MCP 로는 안 보인다)
 - `fluentd` — 파드 로그(kubectl_logs)에서 flush 실패·retry·연결 오류를 보고, 원본 파드 로그와 로그 저장소 마지막 문서 시각을 비교한다
 - `ingress-nginx` — 접근 로그가 로그 저장소에 있으면 경로별 status·request_time 을 집계한다. 없으면 컨트롤러 파드 로그(kubectl_logs)
 - `opensearch` — opensearch MCP 의 ClusterHealthTool·GetShardsTool 로 클러스터 상태·샤드를 직접 본다. 쓰기 거절·디스크 경고는 파드 로그(kubectl_logs)
@@ -99,6 +99,5 @@ KOA 는 클러스터 설정을 바꾸지 않는다. 아래는 이 클러스터�
 
 ## 4. 다음 단계 (MCP)
 
-1. `argocd` — 접근 주소가 하위 경로(http://localhost/argocd)인데 이 MCP 는 경로를 버리고 호스트 루트로 요청한다 → 지금 범위에서는 붙일 수 없다. 3절의 대응 방법으로 본다
-2. `rabbitmq` — 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정). 3절의 대응 방법으로 본다
-3. 접속 정보를 넣은 뒤 `python3 koa/plan.py kind-lab --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다
+1. `rabbitmq` — 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정). 3절의 대응 방법으로 본다
+2. 접속 정보를 넣은 뒤 `python3 koa/plan.py kind-lab --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다

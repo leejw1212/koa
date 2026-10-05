@@ -91,7 +91,7 @@ components:
     crd: jaegertracing.io
   argocd:
     kind: gitops
-    fallback: argocd MCP 를 붙이면 동기화·헬스 상태를 본다. 읽기 전용 SA 는 Application 리소스 조회 권한이 없어 kubernetes MCP 로는 안 보인다
+    fallback: argocd MCP 로 동기화·헬스·diff·이력을 본다 (읽기 전용 SA 는 Application 리소스 조회 권한이 없어 kubernetes MCP 로는 안 보인다)
     image: '(^|/)argoproj/argocd$'
     crd: argoproj.io
     probe: /healthz
@@ -208,23 +208,26 @@ mcp_servers:
         resources: false
 
   argocd:
-    status: candidate
+    status: verified   # 2026-10-05 kind-lab: 하위 경로(/argocd) URL 로 앱 3개 조회, sync 는 MCP 가 'read-only mode' 로 거부, 토큰은 role:readonly(can-i sync/delete no). 도구 15 → 9
     when: component:argocd
     requires_env: [ARGOCD_BASE_URL, ARGOCD_API_TOKEN]
     url_env: ARGOCD_BASE_URL
-    note: MCP_READ_ONLY + 조회 도구만. 토큰은 읽기 전용 role(get/list) 계정으로 발급
-    # 2026-10-05 kind-lab: 토큰은 role:readonly 로 읽기만 됨(can-i sync/delete no) 확인. 하지만 MCP 가 base URL 의 경로를 버린다
-    #   (new URL('/api/v1/...', base) → http://localhost/api/v1/...). Argo CD 를 하위 경로(/argocd)로 연 클러스터에서는 쓸 수 없다.
-    url_must_be_root: true
+    note: MCP_READ_ONLY(기본 true) + 조회 도구만. 토큰은 읽기 전용 role(role:readonly) 계정으로 발급
+    # 처음 고른 argocd-mcp(argoproj-labs) 0.9.0 은 base URL 경로를 버려 하위 경로(/argocd)에서 못 쓴다 → 교체.
+    # peopleforrester/mcp-k8s-observability-argocd-server: PyPI 미배포라 git 커밋으로 고정.
+    #   base_url=f"{url}/api/v1" 로 경로 유지. 쓰기 도구는 등록되지만 MCP_READ_ONLY=true 면 실행 시 거부 → include 로 아예 숨긴다.
     server:
-      command: npx
-      args: [-y, argocd-mcp@0.9.0, stdio]
+      command: uvx
+      args: [--from, "git+https://github.com/peopleforrester/mcp-k8s-observability-argocd-server@6ba6d1b0c9f4b715de1feda49e247d2ccd8378e8", argocd-mcp]
       env:
-        ARGOCD_BASE_URL: ${ARGOCD_BASE_URL}
-        ARGOCD_API_TOKEN: ${ARGOCD_API_TOKEN}
+        ARGOCD_URL: ${ARGOCD_BASE_URL}
+        ARGOCD_TOKEN: ${ARGOCD_API_TOKEN}
         MCP_READ_ONLY: "true"
+        MCP_DISABLE_DESTRUCTIVE: "true"
+        MCP_MASK_SECRETS: "true"
       tools:
-        include: [list_applications, get_application, get_application_resource_tree, get_application_managed_resources, get_resource_events]
+        include: [list_applications, get_application, get_application_status, get_application_diff,
+                  get_application_history, diagnose_sync_failure, get_application_logs, list_clusters, list_projects]
         prompts: false
         resources: false
 
