@@ -1,0 +1,67 @@
+# koa/plan.py --apply 결과 — 다시 실행하면 덮어쓴다
+checked_at: '2026-10-05T04:19:32Z'
+servers:
+  kubernetes:
+    readonly:
+      verdict: ok
+      facts:
+      - 관리자급 권한(secrets·exec·삭제·RBAC) 없음, 네임스페이스 14개 규칙 확인
+      - globalnetworkpolicies.projectcalico.org 쓰기 규칙(ClusterRoleBinding calico-tiered-policy-passthrough)은 Calico 통과용 — tier.globalnetworkpolicies 권한이 없어 실제로는 거부
+      - networkpolicies.projectcalico.org 쓰기 규칙(ClusterRoleBinding calico-tiered-policy-passthrough)은 Calico 통과용 — tier.networkpolicies 권한이 없어 실제로는 거부
+      why: ''
+    registered: 유지
+    probe:
+      ok: true
+      tools: 4
+      secs: 1.8
+      detail: kubectl_get → 3개 항목
+  opensearch:
+    readonly:
+      verdict: warn
+      facts:
+      - 보안 플러그인이 없거나 꺼져 있다 → OpenSearch 자체에 계정·권한이 없다 (앞단 Ingress 인증만)
+      why: 이 계정은 서버에서 쓰기가 가능하다. 쓰기 차단은 MCP 계층(ALLOW_WRITE=false + 조회 도구 5개)에만 의존
+    registered: 유지
+    probe:
+      ok: true
+      tools: 5
+      secs: 2.5
+      detail: ClusterHealthTool → status=green
+  prometheus:
+    readonly:
+      verdict: ok
+      facts:
+      - PromQL 은 쓰기를 표현할 수 없다
+      - lifecycle API(reload/quit) 켜짐 — MCP 에는 이를 부르는 도구가 없다
+      - admin·remote-write·OTLP 수신 API 꺼짐
+      why: ''
+    registered: 유지
+    probe:
+      ok: true
+      tools: 5
+      secs: 1.3
+      detail: execute_query → 값 22
+  grafana:
+    readonly:
+      verdict: ok
+      facts:
+      - 계정 sa-1-koa-readonly, 권한 28개 모두 조회용(read/list/get/query)
+      why: ''
+    registered: 등록
+    probe:
+      ok: true
+      tools: 20
+      secs: 0.2
+      detail: list_datasources → datasources 2개
+  argocd:
+    readonly:
+      verdict: ok
+      facts:
+      - 'can-i: 앱 조회 yes, 쓰기·실행 12종 모두 no'
+      why: ''
+    registered: 유지
+    probe:
+      ok: true
+      tools: 9
+      secs: 0.6
+      detail: 'list_applications → Found 3 application(s):'

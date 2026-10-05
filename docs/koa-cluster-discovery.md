@@ -348,6 +348,47 @@ argoproj-labs `argocd-mcp` 대신 쓸 서버를 찾았다. 조건: 하위 경로
 | 스킬 | `hermes -p koa-test skills list` → 4개 local, enabled |
 | 경로 판별 | 설치본 인식, 결과 경로 `profiles/koa-test/local/clusters`, `.env` 는 프로필 것 |
 
+## 15. 자동 등록 · 읽기 전용 확인 · 조회 (2026-10-05, v0.1.1)
+
+사용자 결정: MCP 는 묻지 않고 자동으로 붙인다. 대신 등록 전에 계정이 읽기 전용인지 백엔드에 물어보고, 등록 후에는 실제로 한 번 조회한다.
+
+`plan.py --apply` 순서 (서버마다)
+
+| 단계 | 도구 | 방법 (쓰기 시도 없음) |
+|---|---|---|
+| 1. 읽기 전용 확인 | `koa/readonly.py` | 백엔드의 권한 질의 API |
+| 2. 등록 | `hermes config set` | `fail` 이면 등록 안 함 / 이미 있으면 해제 |
+| 3. 조회 확인 | `koa/query.py --probe` | 서버를 stdio 로 띄워 카탈로그 `probe` 조회 1개 |
+
+결과는 `<이름>.mcp.yaml` 과 보고서 5절 "붙인 MCP 확인".
+
+백엔드별 읽기 전용 확인
+
+| MCP | 질의 | kind-lab 결과 |
+|---|---|---|
+| kubernetes | 관리자급 SSAR 5개 + 네임스페이스마다 SelfSubjectRulesReview | ok. Calico `networkpolicies` 쓰기 규칙이 보였지만 `calico-tiered-policy-passthrough`(모든 인증 사용자) 이고 `tier.networkpolicies` 권한이 없어 실제로는 거부 |
+| grafana | `/api/user`, `/api/access-control/user/permissions` | ok. 권한 28개 모두 read/list/get/query |
+| argocd | `/api/v1/account/can-i/…` 13개 | ok. 앱 조회 yes, 쓰기·실행 12종 no |
+| prometheus | `/api/v1/status/flags` | ok. admin·remote-write·OTLP 꺼짐 (lifecycle 은 켜져 있지만 MCP 에 부르는 도구 없음) |
+| opensearch | `_cat/plugins` → `_plugins/_security/authinfo` | **warn**. `DISABLE_SECURITY_PLUGIN=true` 라 서버에 계정·권한이 없다 (Ingress basic auth 뿐). 쓰기 차단은 MCP 계층에만 의존 |
+
+`fail` 경로는 모의로 확인: argocd 판정을 fail 로 바꾸자 등록이 해제되고 조회도 하지 않았다.
+
+조회 (`koa/query.py`) — 카탈로그 `queries` 에 MCP 별 이름 붙인 조회를 둔다.
+
+| MCP | 조회 |
+|---|---|
+| kubernetes | `nodes`, `pods ns=`, `events ns=`, `describe kind= name= ns=`, `logs name= ns= tail=` |
+| prometheus | `up`, `down`, `firing`, `restarts range=`, `promql q=` |
+| opensearch | `health`, `indices`, `search index= q= size=` |
+| grafana | `datasources`, `health`, `dashboards q=`, `rules` |
+| argocd | `apps`, `app name=`, `diagnose name=`, `history name=` |
+
+19개 조회 모두 kind-lab 에서 실행해 확인. 이 과정에서 고친 것:
+- grafana `list_alert_groups`·`get_alert_group` 은 Grafana OnCall 도구라 OnCall 이 없으면 404 → 허용 목록에서 뺐다 (22 → 20).
+- opensearch `SearchIndexTool` 인자는 `query_dsl`. `*` 전체 검색은 `@timestamp` 없는 시스템 인덱스에서 샤드 실패 → `index=` 필수.
+- `query.py` 는 Hermes 와 같은 `include` 를 지킨다: `--call grafana grafana_api_request` → 거부.
+
 ## 13. 다음 단계
 
 1. candidate 를 하나씩 verified 로 올린다 (argocd 부터).

@@ -100,4 +100,19 @@ KOA 는 클러스터 설정을 바꾸지 않는다. 아래는 이 클러스터�
 ## 4. 다음 단계 (MCP)
 
 1. `rabbitmq` — 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정). 3절의 대응 방법으로 본다
-2. 접속 정보를 넣은 뒤 `python3 koa/plan.py kind-lab --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다
+2. 접속 정보를 `.env` 에 넣은 뒤 `python3 koa/plan.py kind-lab --apply` 를 다시 돌리면 같은 순서로 붙는다 (candidate 는 `--with <이름>`)
+
+## 5. 붙인 MCP 확인
+
+> 2026-10-05T04:19:32Z · 읽기 전용은 백엔드 권한 질의로, 조회는 서버를 띄워 probe 조회 1개로 확인 (쓰기는 시도하지 않음)
+
+| MCP | 읽기 전용 | 등록 | 조회 | 노출 도구 |
+|---|---|---|---|---|
+| kubernetes | ✅ ok | 유지 | ✅ kubectl_get → 3개 항목 | 4 |
+| opensearch | ⚠️ warn | 유지 | ✅ ClusterHealthTool → status=green | 5 |
+| prometheus | ✅ ok | 유지 | ✅ execute_query → 값 22 | 5 |
+| grafana | ✅ ok | 등록 | ✅ list_datasources → datasources 2개 | 20 |
+| argocd | ✅ ok | 유지 | ✅ list_applications → Found 3 application(s): | 9 |
+
+**주의**
+- `opensearch` — 보안 플러그인이 없거나 꺼져 있다 → OpenSearch 자체에 계정·권한이 없다 (앞단 Ingress 인증만). 이 계정은 서버에서 쓰기가 가능하다. 쓰기 차단은 MCP 계층(ALLOW_WRITE=false + 조회 도구 5개)에만 의존

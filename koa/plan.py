@@ -2,17 +2,22 @@
 """KOA 2단계 — 클러스터 프로필을 보고 붙일 MCP 서버를 정한다.
 
   python3 koa/plan.py kind-lab                      # 계획만 보여준다 (아무것도 바꾸지 않음)
-  python3 koa/plan.py kind-lab --apply              # 준비된 verified 서버를 Hermes 에 등록
+  python3 koa/plan.py kind-lab --apply              # 준비된 verified 서버를 등록 → 읽기 전용 확인 → 조회 확인
   python3 koa/plan.py kind-lab --apply --with prometheus   # candidate 도 명시해서 등록
 
-등록은 `hermes config set mcp_servers.<이름> '<json>'` 으로 한다 → config.yaml(이 저장소) 이 바뀐다.
-비밀 값은 HERMES_HOME/.env 에서 "있는지"만 확인하고 내용은 읽어 출력하지 않는다.
+--apply 순서 (서버마다)
+  1. 읽기 전용 확인 (koa/readonly.py, 백엔드 권한 질의만). fail 이면 등록하지 않고, 이미 있으면 등록을 지운다
+  2. `hermes config set mcp_servers.<이름> '<json>'` 으로 등록 → HERMES_HOME/config.yaml
+  3. 조회 확인 (koa/query.py --probe: 서버를 띄워 probe 조회 1개)
+  결과는 clusters/<이름>.mcp.yaml 에 저장하고 보고서(<이름>.report.md) 5절에 넣는다.
+비밀 값은 HERMES_HOME/.env 에서 "있는지"만 확인하고 내용은 출력하지 않는다.
 """
 import argparse
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -93,12 +98,64 @@ def apply(item):
         raise SystemExit("등록 실패 %s: %s" % (item["name"], (p.stderr or p.stdout).strip()[:300]))
 
 
+def unregister(name):
+    p = subprocess.run([str(HERMES_BIN), "config", "unset", "mcp_servers.%s" % name], capture_output=True, text=True, env=hermes_env())
+    if p.returncode != 0:
+        raise SystemExit("등록 해제 실패 %s: %s" % (name, (p.stderr or p.stdout).strip()[:300]))
+
+
+def apply_and_verify(cluster, plan):
+    """읽기 전용 확인 → 등록 → 조회 확인. 결과 dict 를 clusters/<이름>.mcp.yaml 로 남긴다."""
+    import readonly
+    import query
+    targets = [it for it in plan if it["action"] in ("등록", "유지") or it["state"].startswith("등록됨")]
+    if not targets:
+        print("\n등록할 것이 없다.")
+        return {}
+    print("\n── 1. 읽기 전용 확인 (쓰기는 시도하지 않음)")
+    results, registered_now = {}, []
+    for it in targets:
+        r = readonly.check(it["name"], it["server"])
+        results[it["name"]] = {"readonly": r}
+        print("● %-11s %s — %s%s" % (it["name"], r["verdict"], "; ".join(r["facts"]), ("  → " + r["why"]) if r["why"] else ""))
+    print("\n── 2. 등록")
+    for it in targets:
+        n, verdict = it["name"], results[it["name"]]["readonly"]["verdict"]
+        if verdict == "fail":
+            if it["state"].startswith("등록됨"):
+                unregister(n)
+                results[n]["registered"] = "해제 (읽기 전용 아님)"
+            else:
+                results[n]["registered"] = "안 함 (읽기 전용 아님)"
+            print("✗ %-11s %s" % (n, results[n]["registered"]))
+            continue
+        if it["action"] == "등록":
+            apply(it)
+            results[n]["registered"] = "등록"
+        else:
+            results[n]["registered"] = "유지"
+        registered_now.append(n)
+        print("✓ %-11s %s" % (n, results[n]["registered"]))
+    if registered_now:
+        print("\n── 3. 조회 확인 (서버를 띄워 probe 조회 1개)")
+        pr = query.probe(registered_now, query.catalog(), query.registered())
+        for n, r in pr.items():
+            results[n]["probe"] = r
+    out = CLUSTERS / ("%s.mcp.yaml" % cluster)
+    out.write_text("# koa/plan.py --apply 결과 — 다시 실행하면 덮어쓴다\n" + yaml.safe_dump(
+        {"checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "servers": results},
+        sort_keys=False, allow_unicode=True, width=200))
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cluster", help="clusters/<이름>.yaml 의 이름")
     ap.add_argument("--apply", action="store_true", help="'등록' 항목을 Hermes 설정에 쓴다")
     ap.add_argument("--with", dest="with_names", default="", help="함께 등록할 candidate 이름 (쉼표 구분)")
     a = ap.parse_args()
+    if a.apply:
+        hermes_env()  # HERMES_HOME 이 ~/.hermes 밖이면 여기서 멈춘다 (런처 보호)
 
     prof_path = CLUSTERS / ("%s.yaml" % a.cluster)
     if not prof_path.exists():
@@ -133,13 +190,17 @@ def main():
         if todo:
             print("적용: python3 koa/plan.py %s --apply%s" % (a.cluster, (" --with " + ",".join(sorted(with_names))) if with_names else ""))
         return
-    if not todo:
-        print("\n등록할 것이 없다.")
+    results = apply_and_verify(a.cluster, plan)
+    if not results:
         return
-    for it in todo:
-        apply(it)
-        print("등록: mcp_servers.%s" % it["name"])
-    print("\n완료 (%s). 데스크톱 앱 재시작 (게이트웨이를 쓰면 ~/.local/bin/hermes gateway restart 도)." % CONFIG)
+    import report
+    rep = prof_path.with_suffix(".report.md")
+    rep.write_text(report.build(profile, catalog))
+    bad = [n for n, r in results.items() if r["readonly"]["verdict"] == "fail" or (r.get("probe") and not r["probe"]["ok"])]
+    print("\n보고서 갱신: %s (5절 붙인 MCP 확인)" % rep)
+    if any(r["registered"] == "등록" or r["registered"].startswith("해제") for r in results.values()):
+        print("설정 변경 (%s) → 데스크톱 앱 재시작 (게이트웨이를 쓰면 ~/.local/bin/hermes gateway restart 도)." % CONFIG)
+    sys.exit(1 if bad else 0)
 
 
 if __name__ == "__main__":

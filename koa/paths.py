@@ -44,5 +44,13 @@ def read_env():
 
 
 def hermes_env():
-    """hermes CLI 를 이 HERMES_HOME(프로필)에 대해 실행할 환경."""
+    """hermes CLI 를 이 HERMES_HOME(프로필)에 대해 실행할 환경.
+    ~/.hermes 밖 HERMES_HOME 으로 hermes CLI 를 돌리면 설치본 런처(~/.hermes/hermes-agent/.hermes/bin/hermes)가
+    그 폴더 기준 Python 경로로 다시 써져 hermes 명령 전체가 깨진다(2026-10-05 실측) → 거부한다."""
+    root = (Path.home() / ".hermes").resolve()
+    try:
+        HERMES_HOME.resolve().relative_to(root)
+    except ValueError:
+        raise SystemExit("HERMES_HOME(%s) 이 ~/.hermes 밖이다. hermes CLI 런처가 깨질 수 있어 실행하지 않는다. "
+                         "테스트는 ~/.hermes/profiles/<이름> 프로필로 한다." % HERMES_HOME)
     return {**os.environ, "HERMES_HOME": str(HERMES_HOME)}

@@ -8,15 +8,21 @@
 cd "$HERMES_HOME"                    # 설치본 ~/.hermes/profiles/koa, 개발은 저장소 루트
 python3 koa/discover.py --probe      # 1) 프로필 <이름>.yaml + 결과 표·제안 보고서 <이름>.report.md
 python3 koa/plan.py <이름>           # 2) 설치 계획 (아무것도 바꾸지 않음)
-python3 koa/plan.py <이름> --apply   # 3) 준비된 verified 서버를 이 프로필에 등록 → 앱 재시작
-python3 koa/check_mcp.py <MCP...>    # 4) 서버를 직접 띄워 실제 도구 목록·쓰기 도구 확인
+python3 koa/plan.py <이름> --apply   # 3) 읽기 전용 확인 → 등록 → probe 조회 (확인 없이 자동) → 앱 재시작
+python3 koa/query.py                 # 4) 등록된 MCP 별 조회 목록
+python3 koa/query.py prometheus firing                     #    이름 붙인 조회
+python3 koa/query.py kubernetes logs name=<pod> ns=<ns> tail=50
+python3 koa/query.py --probe         #    서버마다 조회 1개 → 표
+python3 koa/readonly.py [MCP...]     # (단독) 백엔드 계정이 읽기 전용인지
+python3 koa/check_mcp.py [MCP...]    # (단독) 실제 도구 목록과 include 비교
 python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
 ```
 
 **원칙: KOA 는 클러스터를 바꾸지 않는다.** 지금 쓸 수 있는 범위 안에서만 수집·분석하고, KOA 가 하는 변경은 MCP 설치뿐이다.
 
-보고서는 네 부분이다: ① 찾은 구성요소 표(접근 주소·probe·Prometheus 수집 여부) ② 붙일 수 있는 MCP 표
-③ 분석 한계와 KOA 대응(지금 쓸 수 있는 도구로 메우는 방법) ④ 다음 단계(MCP 만). 문구는 `catalog.yaml` 의
+보고서는 다섯 부분이다: ① 찾은 구성요소 표(접근 주소·probe·Prometheus 수집 여부) ② 붙일 수 있는 MCP 표
+③ 분석 한계와 KOA 대응(지금 쓸 수 있는 도구로 메우는 방법) ④ 다음 단계(MCP 만) ⑤ 붙인 MCP 확인(`--apply` 후:
+읽기 전용 판정·등록·probe 조회·노출 도구 수). 문구는 `catalog.yaml` 의
 `gap_advice`(한계별 영향·workaround)와 구성요소의 `fallback` 에서 온다. 클러스터 설정 변경은 제안하지 않는다.
 
 필요: `kubectl`, `python3` + PyYAML, 읽기 전용 kubeconfig(`~/.kube/hermes-readonly.yaml`, 만드는 법은 루트 README).
@@ -28,6 +34,9 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `discover.py` | 읽기 전용 kubeconfig 로 클러스터를 훑어 프로필을 쓴다 |
 | `catalog.yaml` | 무엇을 찾을지(구성요소 감지 규칙)와 찾으면 어떤 MCP 를 붙일지(서버 정의) |
 | `plan.py` | 프로필 + 카탈로그 → 설치 계획. `--apply` 는 `hermes config set mcp_servers.<이름>` 으로 등록 |
+| `query.py` | 카탈로그 `queries`(이름 붙인 조회)·`probe` 를 MCP 로 실행. `--call` 로 허용 목록 안 도구 직접 호출 |
+| `readonly.py` | MCP 계정이 읽기 전용인지 백엔드 권한 질의로 확인 (쓰기 시도 없음). ok / warn / fail / skip |
+| `mcp_client.py` | MCP 서버를 Hermes 와 같은 방식(stdio)으로 띄우는 최소 클라이언트. 허용 목록 밖 도구는 거부 |
 | `check_mcp.py` | MCP 서버를 stdio 로 띄워 실제 도구 목록과 `include` 비교 |
 | `paths.py` | 경로 판별: 설치본이면 프로필 폴더(`.env`, `config.yaml`, 결과는 `local/clusters/`), 개발 체크아웃이면 저장소 `clusters/` + `HERMES_HOME` |
 | `<결과>/<이름>.yaml` | 클러스터 프로필. 우리만의 형식(`koa.cluster-profile/v1`). 자동 생성, 직접 고치지 않는다 |
@@ -49,7 +58,10 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 - MCP 는 `catalog.yaml` 의 `status` 로 나뉜다.
   - `verified` — lab 에서 직접 붙여 읽기 전용임을 확인. `--apply` 로 등록된다.
   - `candidate` — README 로 읽기 전용 설정만 확인. `--with <이름>` 을 줘야 등록된다.
-- 비밀 값은 `~/.hermes/.env` 에 "있는지"만 본다. 없으면 등록하지 않고 할 일로 안내한다.
+- 비밀 값은 `$HERMES_HOME/.env` 에 "있는지"만 본다. 없으면 등록하지 않고 할 일로 안내한다.
+- `--apply` 는 등록 전에 `readonly.py` 로 계정을 확인한다. 쓰기·관리 권한이 있으면(`fail`) 등록하지 않고, 이미 등록돼 있으면 해제한다.
+  백엔드가 계정별 제한을 못 하면(`warn`, 예: 보안 플러그인 꺼진 OpenSearch) 등록하고 보고서 5절에 적는다.
+- `query.py` 는 Hermes 와 같은 `include` 허용 목록을 지킨다. 목록 밖 도구는 `--call` 로도 부르지 않는다.
 
 ## candidate 를 verified 로 올리는 법
 

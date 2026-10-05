@@ -1,6 +1,6 @@
 # KOA — Kubernetes 장애 분석 에이전트 (Hermes 프로필 배포판)
 
-연결한 클러스터를 **읽기 전용으로** 탐색하고, 쓸 수 있는 관측 도구를 정리한 뒤, 사용자와 함께 읽기 전용 MCP 를 붙인다.
+연결한 클러스터를 **읽기 전용으로** 탐색하고, 쓸 수 있는 관측 도구를 정리한 뒤, 읽기 전용 MCP 를 자동으로 붙이고 실제로 조회되는지 확인한다.
 그다음 같은 도구로 장애 원인을 분석한다. **대상 클러스터는 절대 바꾸지 않는다.**
 
 이 저장소는 [Hermes profile distribution](https://hermes-agent.nousresearch.com/docs/user-guide/profile-distributions) 이다.
@@ -31,10 +31,12 @@ KOA 가 하는 일 (스킬 `koa-cluster-discovery`):
 |---|---|---|
 | 1. 사전 점검 | 읽기 전용 kubeconfig 인지 `can-i` 로 확인 | – |
 | 2. 탐색 | `koa/discover.py --probe` → 클러스터 프로필 + 보고서 | – |
-| 3. 보고 | 구성요소 표, 붙일 수 있는 MCP 표, 분석 한계와 대응 | 확인 |
-| 4. 선택 | 어떤 MCP 를 붙일지, 필요한 읽기 전용 토큰 | 고르고 `.env` 에 토큰 입력 |
-| 5. 등록·검증 | `koa/plan.py --apply`, `koa/check_mcp.py` (도구 목록·쓰기 차단) | – |
+| 3. 등록·검증 (자동) | `koa/plan.py --apply`: 계정 읽기 전용 확인 → 등록 → 조회 1개. 쓰기 가능한 계정은 등록 안 함 | – |
+| 4. 보고 | 구성요소, MCP, 분석 한계와 대응, 붙인 MCP 확인 표 | 확인 |
+| 5. 남은 것 | 토큰이 없어 못 붙인 MCP 는 `.env` 에 넣을 키를 안내 → 넣고 다시 말하면 붙임 | `.env` 에 토큰 |
 | 6. 적용 | 앱 재시작 후 새 채팅에서 확인 | 앱 재시작 |
+
+조회: `python3 koa/query.py` (등록된 MCP 별 이름 붙인 조회 목록), `python3 koa/query.py prometheus firing` 등.
 
 장애 분석은 스킬 `cluster-incident-analysis`.
 
@@ -45,7 +47,7 @@ KOA 가 하는 일 (스킬 `koa-cluster-discovery`):
 | `SOUL.md` | KOA 정체성과 항상 지키는 규칙 (클러스터 무변경, 읽기 전용, 토큰은 사용자에게) | 모든 대화의 시스템 프롬프트 |
 | `skills/devops/` | `koa-cluster-discovery`, `cluster-incident-analysis`, `hermes-mcp-servers`, `kubernetes-agent-access` | 스킬 목록 → 해당 작업 때 로드 |
 | `config.yaml` | 모델, 터미널 `KUBECONFIG` 기본값. **MCP 는 비어 있음** (클러스터마다 온보딩 때 등록) | 프로필 설정 |
-| `koa/` | `discover.py`, `plan.py`, `report.py`, `check_mcp.py`, `catalog.yaml` (MCP 정의·검증 상태) | 도구 |
+| `koa/` | `discover.py`, `plan.py`, `query.py`, `readonly.py`, `report.py`, `check_mcp.py`, `mcp_client.py`, `catalog.yaml` (MCP 정의·조회·검증 상태) | 도구 |
 | `k8s/` | 읽기 전용 SA 매니페스트 + kubeconfig 생성 스크립트 | 클러스터 관리자용 |
 | `terminal/agent-env.sh` | 에이전트 터미널의 `KUBECONFIG` 를 읽기 전용 파일로 | `terminal.shell_init_files` |
 | `distribution.yaml` | 배포 매니페스트 (설치 대상 경로, 선택 env 목록) | – |

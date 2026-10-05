@@ -123,7 +123,7 @@ def build(profile, catalog, probed=True):
     unreachable = [it for it in items if any("접근 주소가 없다" in t for t in it["todo"]) or it.get("blocked")]
     nxt = []
     if ready:
-        nxt.append("바로 등록할 수 있다: %s → `python3 koa/plan.py %s --apply`" % (", ".join("`%s`" % it["name"] for it in ready), profile["cluster"]))
+        nxt.append("준비된 것은 자동 등록: %s → `python3 koa/plan.py %s --apply` (읽기 전용 확인 → 등록 → 조회 확인)" % (", ".join("`%s`" % it["name"] for it in ready), profile["cluster"]))
     for it in need_cred:
         envs = [t.split(": ", 1)[1] for t in it["todo"] if " 에 값 채우기: " in t]
         hint = [t for t in it["todo"] if "제안값" in t]
@@ -134,8 +134,28 @@ def build(profile, catalog, probed=True):
         nxt.append("`%s` — %s. 3절의 대응 방법으로 본다" % (it["name"], why))
     if not nxt:
         nxt.append("지금 범위에서 더 붙일 MCP 가 없다.")
-    nxt.append("접속 정보를 넣은 뒤 `python3 koa/plan.py %s --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다" % profile["cluster"])
+    nxt.append("접속 정보를 `.env` 에 넣은 뒤 `python3 koa/plan.py %s --apply` 를 다시 돌리면 같은 순서로 붙는다 (candidate 는 `--with <이름>`)" % profile["cluster"])
     L += ["%d. %s" % (i + 1, s_) for i, s_ in enumerate(nxt)]
+
+    # ── 붙인 MCP 확인 (plan.py --apply 결과) ───────────────
+    mcp = CLUSTERS / ("%s.mcp.yaml" % profile["cluster"])
+    if mcp.exists():
+        res = yaml.safe_load(mcp.read_text())
+        L.append("\n## 5. 붙인 MCP 확인\n")
+        L.append("> %s · 읽기 전용은 백엔드 권한 질의로, 조회는 서버를 띄워 probe 조회 1개로 확인 (쓰기는 시도하지 않음)\n" % res["checked_at"])
+        icon = {"ok": "✅ ok", "warn": "⚠️ warn", "fail": "❌ fail", "skip": "– skip"}
+        rows, notes = [], []
+        for n, r in res["servers"].items():
+            ro, pr = r["readonly"], r.get("probe")
+            rows.append([n, icon.get(ro["verdict"], ro["verdict"]), r.get("registered", "-"),
+                         ("✅ " if pr["ok"] else "❌ ") + pr["detail"] if pr else "-",
+                         pr.get("tools", "-") if pr else "-"])
+            if ro["verdict"] in ("warn", "fail"):
+                notes.append("`%s` — %s%s" % (n, "; ".join(ro["facts"]), (". " + ro["why"]) if ro["why"] else ""))
+        L.append(table(["MCP", "읽기 전용", "등록", "조회", "노출 도구"], rows))
+        if notes:
+            L.append("\n**주의**")
+            L += ["- " + x for x in notes]
     return "\n".join(L) + "\n"
 
 

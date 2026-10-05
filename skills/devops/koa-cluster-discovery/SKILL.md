@@ -1,7 +1,7 @@
 ---
 name: koa-cluster-discovery
 description: "Use when onboarding a cluster to KOA: discover, report, attach MCPs."
-version: 2.0.0
+version: 2.1.0
 metadata:
   hermes:
     tags: [koa, kubernetes, mcp, discovery, onboarding]
@@ -26,7 +26,9 @@ Gaps are analysis limits, presented with the workaround using tools that exist n
 
 ## Onboarding flow (user says "클러스터 확인하고 MCP 세팅해줘" or similar)
 
-Go one step at a time and stop for the user where marked.
+Run the whole flow without asking. MCP registration is automatic: whatever discovery found and
+`.env` already has credentials for gets registered, verified and reported. Stop only when blocked
+(no read-only kubeconfig, account not read-only).
 
 1. **Preflight (read-only).**
    ```bash
@@ -47,19 +49,33 @@ Go one step at a time and stop for the user where marked.
    3. Analysis limits: impact + KOA workaround (from `gap_advice.workaround` and component `fallback`).
    4. Next steps = MCP only: register now / needs credentials / unreachable (no outside URL).
    If a previous profile exists, call out what changed.
-4. **Ask the user** (one clarify form): which MCPs to attach. For each one that needs credentials,
-   ask them to put the values in `$HERMES_HOME/.env` themselves: `OPENSEARCH_*`,
-   `GRAFANA_SERVICE_ACCOUNT_TOKEN` (Viewer SA), `ARGOCD_API_TOKEN` (role:readonly account).
-   Suggest the URL discovery found. Never ask for a secret in chat and never print `.env` values;
-   only check presence. `python3 koa/plan.py <name>` lists what's still missing.
-5. **Register.** `python3 koa/plan.py <name> --apply [--with a,b]` (candidates need `--with`).
-   It runs `~/.local/bin/hermes config set` with `HERMES_HOME` pointing at this profile.
-6. **Verify each attached server** before calling it done:
-   `python3 koa/check_mcp.py <name...>` starts the server over stdio, compares the real tool list
-   with `include` and flags write-looking tools. Then make one real read call per server.
-7. **Apply.** Tell the user to restart the desktop app (and run `~/.local/bin/hermes gateway restart`
-   if they use the gateway), then open a new chat in the KOA profile and confirm there with
-   `tool_search` and one call per MCP.
+4. **Register + verify, automatically.** `python3 koa/plan.py <name> --apply` (no confirmation).
+   For every verified MCP whose component was found and whose `.env` keys are present it:
+   1. checks the backend account is read-only (`koa/readonly.py`: permission queries only, no writes).
+      `fail` = account can write/admin → not registered (and unregistered if it was);
+      `warn` = backend can't restrict this account (e.g. OpenSearch without security plugin) →
+      registered, MCP-layer blocking only, called out in the report;
+   2. registers it (`~/.local/bin/hermes config set`, `HERMES_HOME` = this profile);
+   3. starts it over stdio and runs one probe query (`koa/query.py --probe`).
+   Results → `<name>.mcp.yaml` and report section 5. Candidates are never auto-registered
+   (`--with <name>` only if the user asks).
+5. **Report the result** as tables: section 5 (read-only verdict, registered, probe, exposed tools),
+   then section 4 for what is still missing. For missing credentials, tell the user which keys to put
+   in `$HERMES_HOME/.env` themselves (`OPENSEARCH_*`, `GRAFANA_SERVICE_ACCOUNT_TOKEN` = Viewer SA,
+   `ARGOCD_API_TOKEN` = role:readonly account) with the URL discovery found, and that rerunning
+   `plan.py --apply` attaches them. Never ask for a secret in chat; never print `.env` values.
+6. **Apply.** If config changed, tell the user to restart the desktop app (and
+   `~/.local/bin/hermes gateway restart` if they use the gateway), then open a new chat in this profile.
+
+## Querying (after onboarding)
+
+`python3 koa/query.py` lists named queries per registered MCP (from `koa/catalog.yaml` `queries`);
+`python3 koa/query.py <mcp> <query> key=value ...` runs one through the same stdio server and
+allowlist, e.g. `prometheus firing`, `prometheus restarts range=6h`, `kubernetes logs name=<pod> ns=<ns>`,
+`opensearch search index='app-*' q='level:error'`, `argocd history name=<app>`. `--call <mcp> <tool> '<json>'`
+calls any allowlisted tool directly. In a chat where the MCP tools are loaded, calling them directly is
+equivalent; use query.py from the terminal, in scripts, or before the app has been restarted.
+`python3 koa/query.py --probe` = one read per server as a health table.
 
 Advice text lives in `koa/catalog.yaml` (`gap_advice`, component `fallback`). Improve it there,
 not in ad-hoc chat text.
@@ -71,7 +87,8 @@ not in ad-hoc chat text.
    prefer can-i APIs over real write attempts).
 2. `plan.py --apply --with <mcp>`, then `check_mcp.py <mcp>`, one real read, and one write attempt
    that must be refused (dry-run where possible).
-3. Fix `include`, set `status: verified` with a dated comment in `koa/catalog.yaml`, update
+3. Fix `include`, add `probe` (one cheap read) and `queries`, add a `check_<mcp>` to `koa/readonly.py`,
+   set `status: verified` with a dated comment in `koa/catalog.yaml`, update
    `docs/koa-cluster-discovery.md`, commit and push.
 
 ## Pitfalls
@@ -88,3 +105,20 @@ not in ad-hoc chat text.
 - mcp-grafana `--disable-write` still exposes 62 tools incl. `alerting_manage_routing` and
   `grafana_api_request`; keep the curated `include` list.
 - macOS system python is 3.9 — keep KOA scripts free of 3.10+ syntax.
+- Never run the `hermes` CLI (incl. `plan.py --apply`) with `HERMES_HOME` outside `~/.hermes`: it
+  re-mints `~/.hermes/hermes-agent/.hermes/bin/hermes` against that folder's Python and every `hermes`
+  command breaks. `paths.hermes_env()` refuses; test with a throwaway profile under
+  `~/.hermes/profiles/`. Repair: run `ensure_install_launchers(repo, repo/.hermes/bin)` with the store
+  Python from `~/.hermes/tools/python-*/bin/python3` and `HERMES_HOME` unset.
+- Calico API server grants create/delete on `projectcalico.org` networkpolicies to every authenticated
+  user (`calico-tiered-policy-passthrough`) and enforces via `tier.networkpolicies`; readonly.py checks
+  the tier permission before calling it a write leak. Use SelfSubjectRulesReview per namespace +
+  SelfSubjectAccessReview `reason` to find which binding grants a verb.
+- OpenSearch with `DISABLE_SECURITY_PLUGIN=true` still lists `opensearch-security` in `_cat/plugins`;
+  `/_plugins/_security/authinfo` returns 400 "no handler". Then there are no accounts server-side
+  (Ingress basic auth only) → readonly verdict `warn`.
+- mcp-grafana `list_alert_groups`/`get_alert_group` are Grafana OnCall tools (404 without OnCall);
+  Prometheus rule state is in `alerting_rules_read` with `datasource_uid`, firing alerts via
+  Prometheus `ALERTS{alertstate="firing"}`.
+- opensearch `SearchIndexTool` takes `query_dsl` (not `query`); searching `*` fails on system indices
+  without `@timestamp` — always pass an index pattern.

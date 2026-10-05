@@ -146,6 +146,15 @@ mcp_servers:
         include: [kubectl_get, kubectl_describe, kubectl_logs, explain_resource]
         prompts: false
         resources: false
+    # probe: 등록 직후 "실제로 읽히는지" 확인하는 조회 1개 (query.py --probe, 결과 길이와 오류만 본다)
+    # queries: 이름 붙인 분석용 조회. {변수} 는 query.py 인자 key=value 로 채운다 (기본값은 defaults)
+    probe: {tool: kubectl_get, args: {resourceType: nodes, output: json}}
+    queries:
+      nodes:     {tool: kubectl_get, args: {resourceType: nodes, output: json}, help: "노드와 Ready 상태"}
+      pods:      {tool: kubectl_get, args: {resourceType: pods, namespace: "{ns}", output: json}, defaults: {ns: default}, help: "네임스페이스 파드 목록"}
+      events:    {tool: kubectl_get, args: {resourceType: events, namespace: "{ns}", output: json}, defaults: {ns: default}, help: "네임스페이스 이벤트 (보존 기간 안의 것만)"}
+      describe:  {tool: kubectl_describe, args: {resourceType: "{kind}", name: "{name}", namespace: "{ns}"}, defaults: {kind: pods, ns: default}, help: "리소스 describe (kind=, name=, ns=)"}
+      logs:      {tool: kubectl_logs, args: {resourceType: pod, name: "{name}", namespace: "{ns}", tail: "{tail}"}, defaults: {ns: default, tail: 100}, help: "파드 로그 끝부분 (name=, ns=, tail=)"}
 
   opensearch:
     status: verified
@@ -165,6 +174,11 @@ mcp_servers:
         include: [ListIndexTool, IndexMappingTool, SearchIndexTool, GetShardsTool, ClusterHealthTool]
         prompts: false
         resources: false
+    probe: {tool: ClusterHealthTool, args: {}}
+    queries:
+      health:  {tool: ClusterHealthTool, args: {}, help: "클러스터 상태"}
+      indices: {tool: ListIndexTool, args: {include_detail: false}, help: "인덱스 목록"}
+      search:  {tool: SearchIndexTool, args: {index: "{index}", query_dsl: {size: "{size}", sort: [{"@timestamp": desc}], query: {query_string: {query: "{q}"}}}}, defaults: {q: "*", size: 20}, help: "최근 문서 검색 (index=패턴 필수, q=lucene 쿼리, size=)"}
 
   prometheus:
     status: verified   # 2026-10-05 kind-lab: 도구 6개 중 5개 노출(health_check 제외), execute_query 실제 조회 확인, admin API 는 서버에서 꺼져 있음
@@ -182,9 +196,16 @@ mcp_servers:
         include: [execute_query, execute_range_query, list_metrics, get_metric_metadata, get_targets]
         prompts: false
         resources: false
+    probe: {tool: execute_query, args: {query: "count(up == 1)"}}
+    queries:
+      up:       {tool: execute_query, args: {query: "sum by (job) (up)"}, help: "수집 대상 job 별 up 수"}
+      down:     {tool: execute_query, args: {query: "up == 0"}, help: "수집 실패 중인 대상"}
+      promql:   {tool: execute_query, args: {query: "{q}"}, help: "임의 PromQL 즉시 조회 (q=)"}
+      restarts: {tool: execute_query, args: {query: "topk(10, increase(kube_pod_container_status_restarts_total[{range}]))"}, defaults: {range: 1h}, help: "최근 재시작 많은 컨테이너 (range=)"}
+      firing:   {tool: execute_query, args: {query: "ALERTS{alertstate=\"firing\"}"}, help: "지금 발화 중인 알림"}
 
   grafana:
-    status: verified   # 2026-10-05 kind-lab: --disable-write 에서도 도구 62개 → 분석용 조회 도구만 include. Viewer 토큰으로 대시보드·폴더 생성 403 확인
+    status: verified   # 2026-10-05 kind-lab: --disable-write 에서도 도구 62개 → 분석용 조회 도구 20개만 include. Viewer 토큰으로 대시보드·폴더 생성 403 확인
     when: component:grafana
     requires_env: [GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN]
     url_env: GRAFANA_URL
@@ -198,14 +219,21 @@ mcp_servers:
       tools:
         # 제외: alerting_manage_routing(이름상 관리 도구), grafana_api_request(GET 전용이지만 API 전체에 열림),
         #       oncall·incident·pyroscope·tempo·provisioning·docs 등 이 분석 범위 밖 도구
+        #       list_alert_groups·get_alert_group 은 OnCall 전용(OnCall 없으면 404) → 2026-10-05 제외, 22 → 20
         include: [list_datasources, get_datasource, check_datasources_health,
                   search_dashboards, get_dashboard_summary, get_dashboard_panel_queries, get_dashboard_property,
                   query_prometheus, query_prometheus_histogram, list_prometheus_metric_names, list_prometheus_metric_metadata,
                   list_prometheus_label_names, list_prometheus_label_values,
                   query_loki_logs, query_loki_stats, query_loki_patterns, list_loki_label_names, list_loki_label_values,
-                  list_alert_groups, get_alert_group, alerting_rules_read, get_annotations]
+                  alerting_rules_read, get_annotations]
         prompts: false
         resources: false
+    probe: {tool: list_datasources, args: {}}
+    queries:
+      datasources: {tool: list_datasources, args: {}, help: "데이터소스 목록"}
+      health:      {tool: check_datasources_health, args: {}, help: "데이터소스 상태"}
+      dashboards:  {tool: search_dashboards, args: {query: "{q}"}, defaults: {q: ""}, help: "대시보드 검색 (q=)"}
+      rules:       {tool: alerting_rules_read, args: {operation: list}, help: "Grafana 관리 알림 규칙 (Prometheus 규칙·발화 중 알림은 prometheus firing)"}
 
   argocd:
     status: verified   # 2026-10-05 kind-lab: 하위 경로(/argocd) URL 로 앱 3개 조회, sync 는 MCP 가 'read-only mode' 로 거부, 토큰은 role:readonly(can-i sync/delete no). 도구 15 → 9
@@ -230,6 +258,12 @@ mcp_servers:
                   get_application_history, diagnose_sync_failure, get_application_logs, list_clusters, list_projects]
         prompts: false
         resources: false
+    probe: {tool: list_applications, args: {params: {}}}
+    queries:
+      apps:     {tool: list_applications, args: {params: {}}, help: "앱 목록과 health·sync"}
+      app:      {tool: get_application_status, args: {params: {name: "{name}"}}, help: "앱 상태 (name=)"}
+      diagnose: {tool: diagnose_sync_failure, args: {params: {name: "{name}"}}, help: "동기화 실패 진단 (name=)"}
+      history:  {tool: get_application_history, args: {params: {name: "{name}", limit: 5}}, help: "배포 이력 (name=)"}
 
   rabbitmq:
     status: candidate
