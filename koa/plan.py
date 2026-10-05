@@ -69,7 +69,7 @@ def build_plan(profile, catalog, with_names):
             if urls and m.get("url_env") in missing:
                 item["todo"].append("%s 제안값: %s" % (m["url_env"], urls[0]))
             if not urls and m.get("url_env"):
-                item["todo"].append("클러스터 밖 접근 주소가 없다 → Ingress/LB 로 열거나 %s 를 직접 지정" % m["url_env"])
+                item["todo"].append("클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 %s 에 직접 지정)" % m["url_env"])
         if name in current:
             item["state"] = "등록됨 (동일)" if current[name] == m["server"] else "등록됨 (카탈로그와 다름 → --apply 시 갱신)"
         else:

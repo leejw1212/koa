@@ -1,6 +1,6 @@
 # KOA 탐색 결과 — kind-lab
 
-> 2026-10-05T02:33:03Z · 계정 `system:serviceaccount:hermes:hermes-readonly` · 읽기 전용 ✅
+> 2026-10-05T02:38:03Z · 계정 `system:serviceaccount:hermes:hermes-readonly` · 읽기 전용 ✅
 
 | 항목 | 값 |
 |---|---|
@@ -39,57 +39,68 @@
 | prometheus | candidate | prometheus 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: PROMETHEUS_URL; PROMETHEUS_URL 제안값: http://localhost/prometheus |
 | grafana | candidate | grafana 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN; GRAFANA_URL 제안값: http://localhost/grafana |
 | argocd | candidate | argocd 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: ARGOCD_BASE_URL, ARGOCD_API_TOKEN; ARGOCD_BASE_URL 제안값: http://localhost/argocd |
-| rabbitmq | candidate | rabbitmq 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: RABBITMQ_MANAGEMENT_ENDPOINT; 클러스터 밖 접근 주소가 없다 → Ingress/LB 로 열거나 RABBITMQ_MANAGEMENT_ENDPOINT 를 직접 지정 |
-| fluentd | - | fluentd 감지 | - | 붙이지 않음 | 전용 MCP 없음. prometheus 플러그인 지표 → Prometheus 로 보는 것이 정석 |
-| redis | - | redis 감지 | - | 붙이지 않음 | 카탈로그에 없음 (장애 분석용으로는 지표가 우선) |
+| rabbitmq | candidate | rabbitmq 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: RABBITMQ_MANAGEMENT_ENDPOINT; 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정) |
+| fluentd | - | fluentd 감지 | - | 붙이지 않음 | 전용 MCP 없음 → kubernetes MCP 로 파드 로그를 본다 |
+| redis | - | redis 감지 | - | 붙이지 않음 | 카탈로그에 없음 → kubernetes MCP 로 파드 로그를 본다 |
 
-## 3. 빈 곳과 제안
+## 3. 분석 한계와 KOA 대응
 
-| # | 우선 | 빈 곳 | 분석에 미치는 영향 | 누가 |
-|---|---|---|---|---|
-| 1 | 🔴 높음 | fluentd 자체 상태(버퍼·재시도·처리량)를 보는 신호 없음 | 로그가 안 보일 때 트래픽이 없는 건지 수집이 끊긴 건지 구분할 수 없다 (kind-lab 에서 실제로 겪음) | 클러스터 운영팀 |
-| 2 | 🔴 높음 | k8s 이벤트 보존 1h (kube-apiserver 기본값 (--event-ttl 없음)) | 장애 뒤 분석을 시작하면 재시작·OOM·스케줄링 실패 이력이 이미 사라져 있다 | 클러스터 운영팀 |
-| 3 | 🟡 중간 | 클러스터 밖 접근 주소 없음: alertmanager, rabbitmq | 클러스터 안에는 있지만 KOA(MCP)가 닿지 못해 그 데이터를 분석에 쓸 수 없다. 읽기 전용 SA 는 port-forward 도 막혀 있다 | 클러스터 운영팀 |
-| 4 | 🟡 중간 | Prometheus 가 수집하지 않는 구성요소: argocd, fluentd, ingress-nginx, opensearch, rabbitmq, redis | 이 구성요소들은 문제가 생겨도 로그로만 보인다 — 큐 적체, 버퍼 증가처럼 서서히 나빠지는 장애를 놓친다 | 클러스터 운영팀 |
-| 5 | ⚪ 낮음 | metrics API(metrics-server) 없음 | kubectl top 과 HPA 를 쓸 수 없다. Prometheus 가 있으면 CPU·메모리는 cAdvisor 지표로 대신 본다 | 클러스터 운영팀 |
-| 6 | ⚪ 낮음 | 트레이스 없음 | 서비스 간 어느 구간에서 느려지는지 로그의 request_id 를 이어 붙여 추정한다 | 클러스터 운영팀 |
+KOA 는 클러스터 설정을 바꾸지 않는다. 아래는 이 클러스터에서 분석할 때 감안할 한계와, 지금 쓸 수 있는 도구로 메우는 방법이다.
 
-### 1. 로그 수집기 자체 상태 감시
+| # | 영향 | 한계 | 분석에 미치는 영향 |
+|---|---|---|---|
+| 1 | 🔴 큼 | fluentd 자체 상태(버퍼·재시도·처리량)를 보는 신호 없음 | 로그가 안 보일 때 트래픽이 없는 건지 수집이 끊긴 건지 바로 판정할 수 없다 (kind-lab 에서 실제로 겪음) |
+| 2 | 🔴 큼 | k8s 이벤트 보존 1h (kube-apiserver 기본값 (--event-ttl 없음)) | 보존 기간이 지나면 재시작·OOM·스케줄링 실패 이력이 사라진다 |
+| 3 | 🟡 중간 | 클러스터 밖 접근 주소 없음: alertmanager, rabbitmq | 클러스터 안에는 있지만 클러스터 밖 접근 주소가 없어 MCP 로 조회할 수 없다 (읽기 전용 계정은 port-forward 도 막혀 있다) |
+| 4 | 🟡 중간 | Prometheus 가 수집하지 않는 구성요소: argocd, fluentd, ingress-nginx, opensearch, rabbitmq, redis | 이 구성요소들은 지표 없이 로그와 k8s 상태로만 본다. 큐 적체·버퍼 증가처럼 서서히 나빠지는 문제는 늦게 보인다 |
+| 5 | ⚪ 작음 | metrics API(metrics-server) 없음 | 지금 CPU·메모리 사용량(kubectl top)을 볼 수 없다 |
+| 6 | ⚪ 작음 | 트레이스 없음 | 서비스 간 어느 구간에서 느려지는지 직접 볼 수 없다 |
 
-- 수집기 지표(버퍼 길이, 재시도, 출력 오류, 처리량)를 Prometheus 로 수집 — 구성요소별 방법은 아래 '수집하지 않는 구성요소' 참고
-- 노드마다 1분에 한 번 heartbeat 레코드를 로그 저장소로 보내 마지막 수신 시각을 바로 볼 수 있게 한다
-- 수신이 N분 끊기면 울리는 경보
+### 1. 로그 수집기 상태를 볼 지표 없음
 
-### 2. k8s 이벤트 장기 보관
+**KOA 대응**
+- 수집기 파드 로그(kubectl_logs)에서 flush 실패·retry·연결 오류를 본다
+- 원본 파드 로그와 로그 저장소의 마지막 문서 시각을 비교한다. 원본에는 있는데 저장소에 없으면 수집 중단이다
+- 수집기 설정(ConfigMap)에서 일부러 버리는 로그(필터)를 확인한다
 
-- kubernetes-event-exporter 로 이벤트를 로그 저장소(OpenSearch 등)에 보낸다 — --event-ttl 을 늘리는 것보다 etcd 부담이 없다
-- 그 전까지 KOA 는 분석 첫 단계에서 이벤트부터 읽는다 (1시간 안에 사라짐)
+### 2. k8s 이벤트 보존 짧음
 
-### 3. 관측 시스템 접근 경로
+**KOA 대응**
+- 분석 첫 단계에서 이벤트부터 읽는다
+- 사라진 이력은 파드 status(lastState.terminated 의 reason·exitCode·시각, restartCount)로 복원한다. 마지막 1회만 남는다
 
-- Ingress 로 열되 반드시 인증(Basic Auth/OIDC)과 읽기 전용 계정을 붙인다. 또는 MCP 서버를 클러스터 안에서 띄운다
-- `alertmanager` — 급하지 않다 — 지금 울리는 경보는 Prometheus 의 ALERTS 지표·/api/v1/alerts 로 볼 수 있다. silence·이력까지 보려면 Ingress(routePrefix /alertmanager)로 연다 (서비스: alertmanager-operated (http-web:9093, tcp-mesh:9094, udp-mesh:9094), monitoring-kube-prometheus-alertmanager (http-web:9093, reloader-web:8080))
-- `rabbitmq` — 관리 API(15672)를 Ingress + 인증으로 열고 monitoring 태그 전용 사용자를 만든다. 큐 상태만 필요하면 15692 지표를 Prometheus 로 보는 것으로 충분하다 (서비스: rabbitmq (amqp:5672, management:15672))
+### 3. KOA 가 닿지 못하는 관측 시스템
 
-### 4. 지표를 수집하지 않는 구성요소
+**KOA 대응**
+- 주소를 따로 알고 있으면 .env 에 직접 지정해 MCP 를 붙인다
+- `alertmanager` — 지금 울리는 경보는 prometheus MCP 로 ALERTS 지표를 조회해 본다
+- `rabbitmq` — 파드 로그(메모리·디스크 경보, 연결 끊김)와 소비자 앱 로그(재연결·처리 지연)로 본다. 큐 길이·소비자 수는 지금 범위에서 볼 수 없다
 
-- `argocd` — argocd-metrics(8082)·argocd-server-metrics(8083)·argocd-repo-server(8084) 서비스가 이미 있다 → ServiceMonitor 만 추가 (Helm 이면 *.metrics.serviceMonitor.enabled=true) — 동기화 실패·앱 헬스
-- `fluentd` — fluent-plugin-prometheus(이미지에 보통 포함)로 <source> @type prometheus(24231) + prometheus_monitor + prometheus_output_monitor 를 켜고 ServiceMonitor 추가 — 버퍼 길이·재시도·출력 오류
-- `ingress-nginx` — Helm controller.metrics.enabled=true + controller.metrics.serviceMonitor.enabled=true (10254) — 경로별 요청 수·5xx·지연. 장애 영향 범위를 가장 먼저 보여주는 지표
-- `opensearch` — prometheus-community/elasticsearch-exporter(OpenSearch 호환) 를 띄우고 ServiceMonitor 로 수집 — 클러스터 상태·디스크·쓰기 거절(rejected) 지표
-- `rabbitmq` — rabbitmq_prometheus 플러그인(15692)을 서비스 포트로 열고 ServiceMonitor 추가 — 큐 길이·소비자 수·unacked. 큐별 값은 /metrics/per-object 또는 /metrics/detailed. 공식 이미지는 플러그인이 기본으로 켜져 있는지 확인 필요
-- `redis` — oliver006/redis_exporter(9121) 사이드카 + ServiceMonitor — 메모리·연결 수·eviction
+### 4. Prometheus 가 수집하지 않는 구성요소
 
-### 5. metrics-server 설치
+**KOA 대응**
+- `argocd` — argocd MCP 를 붙이면 동기화·헬스 상태를 본다. 읽기 전용 SA 는 Application 리소스 조회 권한이 없어 kubernetes MCP 로는 안 보인다
+- `fluentd` — 파드 로그(kubectl_logs)에서 flush 실패·retry·연결 오류를 보고, 원본 파드 로그와 로그 저장소 마지막 문서 시각을 비교한다
+- `ingress-nginx` — 접근 로그가 로그 저장소에 있으면 경로별 status·request_time 을 집계한다. 없으면 컨트롤러 파드 로그(kubectl_logs)
+- `opensearch` — opensearch MCP 의 ClusterHealthTool·GetShardsTool 로 클러스터 상태·샤드를 직접 본다. 쓰기 거절·디스크 경고는 파드 로그(kubectl_logs)
+- `rabbitmq` — 파드 로그(메모리·디스크 경보, 연결 끊김)와 소비자 앱 로그(재연결·처리 지연)로 본다. 큐 길이·소비자 수는 지금 범위에서 볼 수 없다
+- `redis` — 파드 로그와 앱 로그의 연결 오류·타임아웃으로 본다
 
-- metrics-server 설치 (HPA 를 쓰려면 필수)
+### 5. metrics API 없음
 
-### 6. 분산 트레이스
+**KOA 대응**
+- Prometheus 가 있으면 cAdvisor 지표(container_cpu_usage_seconds_total, container_memory_working_set_bytes)로 본다
+- 없으면 OOMKilled 기록과 requests·limits 설정으로 추정한다
 
-- OpenTelemetry SDK + collector + Tempo/Jaeger. ingress 에서 request_id 를 이미 넘기고 있다면 trace_id 로 확장
+### 6. 트레이스 없음
 
-## 4. 다음 단계
+**KOA 대응**
+- 로그의 request_id 로 ingress → 앱 → 워커 로그를 이어 붙여 구간별 시간을 계산한다 (필드가 있을 때)
 
-1. **KOA 가 바로 할 수 있는 것** — 접근 주소가 이미 있는 MCP 를 붙여 verified 로 올린다: `prometheus`, `grafana`, `argocd`
-2. **클러스터 운영팀에 요청할 것 (우선 높음)** — 로그 수집기 자체 상태 감시 / k8s 이벤트 장기 보관
-3. 변경 후 `python3 koa/discover.py --probe` 로 다시 탐색해 이 보고서가 바뀌는지 확인한다.
+## 4. 다음 단계 (MCP)
+
+1. `prometheus` — 접속 정보(PROMETHEUS_URL)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다 (PROMETHEUS_URL 제안값: http://localhost/prometheus). 근거: PromQL 은 쓰기를 표현할 수 없어 도구 자체가 읽기 전용
+2. `grafana` — 접속 정보(GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다 (GRAFANA_URL 제안값: http://localhost/grafana). 근거: --disable-write 로 쓰기 도구 미등록
+3. `argocd` — 접속 정보(ARGOCD_BASE_URL, ARGOCD_API_TOKEN)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다 (ARGOCD_BASE_URL 제안값: http://localhost/argocd). 근거: MCP_READ_ONLY + 조회 도구만
+4. `rabbitmq` — 클러스터 밖 접근 주소가 없어 지금 범위에서는 붙일 수 없다. 3절의 대응 방법으로 본다
+5. 접속 정보를 넣은 뒤 `python3 koa/plan.py kind-lab --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다

@@ -18,8 +18,7 @@ KIND_KO = {
     "dashboard": "대시보드", "logs": "로그 저장소", "log-shipper": "로그 수집기", "telemetry-collector": "텔레메트리 수집기",
     "traces": "트레이스", "gitops": "GitOps", "message-queue": "메시지 큐", "cache": "캐시", "ingress": "Ingress",
 }
-PRIO = {1: "🔴 높음", 2: "🟡 중간", 3: "⚪ 낮음"}
-OWNER = {"koa": "KOA(우리)", "cluster": "클러스터 운영팀"}
+PRIO = {1: "🔴 큼", 2: "🟡 중간", 3: "⚪ 작음"}
 
 
 def _cell(s):
@@ -90,45 +89,51 @@ def build(profile, catalog, probed=True):
         rows.append([c, "-", "%s 감지" % c, "-", "붙이지 않음", why])
     L.append(table(["MCP", "검증", "근거", "현재", "판단", "필요한 것"], rows))
 
-    # ── 빈 곳과 제안 ──────────────────────────────────
-    L.append("\n## 3. 빈 곳과 제안\n")
-    gaps = []
-    for g in profile["gaps"]:
-        a = advice.get(g["id"], {})
-        gaps.append((a.get("priority", 3), g, a))
-    gaps.sort(key=lambda x: x[0])
-    L.append(table(["#", "우선", "빈 곳", "분석에 미치는 영향", "누가"],
-                   [[n + 1, PRIO[p], g["detail"].split(" → ")[0], a.get("impact", g["detail"].split(" → ")[-1]), OWNER.get(a.get("owner"), "-")]
+    # ── 분석 한계와 KOA 대응 ─────────────────────────────
+    # KOA 는 클러스터를 바꾸지 않는다. 빈 곳은 고칠 것이 아니라 분석할 때 감안할 한계로 보여주고,
+    # 지금 쓸 수 있는 도구로 어떻게 메우는지만 적는다.
+    L.append("\n## 3. 분석 한계와 KOA 대응\n")
+    L.append("KOA 는 클러스터 설정을 바꾸지 않는다. 아래는 이 클러스터에서 분석할 때 감안할 한계와, 지금 쓸 수 있는 도구로 메우는 방법이다.\n")
+    gaps = sorted(((advice.get(g["id"], {}).get("priority", 3), g, advice.get(g["id"], {})) for g in profile["gaps"]),
+                  key=lambda x: x[0])
+    L.append(table(["#", "영향", "한계", "분석에 미치는 영향"],
+                   [[n + 1, PRIO[p], g["detail"].split(" → ")[0], a.get("impact", g["detail"].split(" → ")[-1])]
                     for n, (p, g, a) in enumerate(gaps)]))
-
     for n, (p, g, a) in enumerate(gaps):
         L.append("\n### %d. %s\n" % (n + 1, a.get("title", g["detail"].split(" → ")[0])))
-        steps = list(a.get("steps", []))
+        steps = list(a.get("workaround", []))
+        names = []
         if g["id"] == "not-scraped" and cov:
-            for name in cov.get("not_scraped", []):
-                hint = comp_rules.get(name, {}).get("metrics_hint")
-                steps.append("`%s` — %s" % (name, hint or "지표 노출 방법 확인 필요"))
-        if g["id"] == "no-access":
-            for name in g["detail"].split(": ", 1)[1].split(", "):
-                svcs = [s for i in comps.get(name, {}).get("instances", []) for s in i.get("services", [])]
-                hint = comp_rules.get(name, {}).get("access_hint")
-                steps.append("`%s` — %s%s" % (name, hint or "Ingress(인증 포함)로 연다", (" (서비스: %s)" % ", ".join(svcs)) if svcs else ""))
-        for s in steps:
-            L.append("- " + s.strip())
+            names = cov.get("not_scraped", [])
+        elif g["id"] == "no-access":
+            names = [x.strip() for x in g["detail"].split(":", 1)[1].split(",")]
+        for name in names:
+            fb = comp_rules.get(name, {}).get("fallback")
+            steps.append("`%s` — %s" % (name, fb or "kubernetes MCP 로 파드 로그·상태를 본다"))
+        L.append("**KOA 대응**")
+        for s_ in steps:
+            L.append("- " + s_.strip())
 
-    # ── 다음 단계 ────────────────────────────────────
-    koa_now = [it for it in items if it["status"] == "candidate" and it["action"].startswith("보류 (준비")
-               and not any("접근 주소가 없다" in t for t in it["todo"])]
-    L.append("\n## 4. 다음 단계\n")
+    # ── 다음 단계: MCP 로 할 수 있는 것만 ─────────────────
+    L.append("\n## 4. 다음 단계 (MCP)\n")
+    ready = [it for it in items if it["action"] == "등록"]
+    need_cred = [it for it in items if it["action"].startswith("보류 (준비")
+                 and not any("접근 주소가 없다" in t for t in it["todo"])]
+    unreachable = [it for it in items if any("접근 주소가 없다" in t for t in it["todo"])]
     nxt = []
-    if koa_now:
-        nxt.append("**KOA 가 바로 할 수 있는 것** — 접근 주소가 이미 있는 MCP 를 붙여 verified 로 올린다: %s"
-                   % ", ".join("`%s`" % it["name"] for it in koa_now))
-    cl = [a.get("title", g["detail"]) for p, g, a in gaps if a.get("owner") == "cluster" and p == 1]
-    if cl:
-        nxt.append("**클러스터 운영팀에 요청할 것 (우선 높음)** — " + " / ".join(cl))
-    nxt.append("변경 후 `python3 koa/discover.py --probe` 로 다시 탐색해 이 보고서가 바뀌는지 확인한다.")
-    L += ["%d. %s" % (i + 1, s) for i, s in enumerate(nxt)]
+    if ready:
+        nxt.append("바로 등록할 수 있다: %s → `python3 koa/plan.py %s --apply`" % (", ".join("`%s`" % it["name"] for it in ready), profile["cluster"]))
+    for it in need_cred:
+        envs = [t.split(": ", 1)[1] for t in it["todo"] if t.startswith("~/.hermes/.env")]
+        hint = [t for t in it["todo"] if "제안값" in t]
+        nxt.append("`%s` — 접속 정보(%s)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다%s. 근거: %s"
+                   % (it["name"], ", ".join(envs) or "-", (" (" + hint[0] + ")") if hint else "", it["note"].split(".")[0]))
+    for it in unreachable:
+        nxt.append("`%s` — 클러스터 밖 접근 주소가 없어 지금 범위에서는 붙일 수 없다. 3절의 대응 방법으로 본다" % it["name"])
+    if not nxt:
+        nxt.append("지금 범위에서 더 붙일 MCP 가 없다.")
+    nxt.append("접속 정보를 넣은 뒤 `python3 koa/plan.py %s --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다" % profile["cluster"])
+    L += ["%d. %s" % (i + 1, s_) for i, s_ in enumerate(nxt)]
     return "\n".join(L) + "\n"
 
 

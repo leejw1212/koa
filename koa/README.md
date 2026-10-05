@@ -9,9 +9,11 @@ python3 koa/plan.py <이름> --apply   # 3) 준비된 verified 서버를 Hermes 
 python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
 ```
 
+**원칙: KOA 는 클러스터를 바꾸지 않는다.** 지금 쓸 수 있는 범위 안에서만 수집·분석하고, KOA 가 하는 변경은 MCP 설치뿐이다.
+
 보고서는 네 부분이다: ① 찾은 구성요소 표(접근 주소·probe·Prometheus 수집 여부) ② 붙일 수 있는 MCP 표
-③ 빈 곳과 제안(우선순위·영향·누가 할 일인지·구체적 방법) ④ 다음 단계. 제안 문구는 `catalog.yaml` 의
-`gap_advice`(빈 곳별)와 구성요소의 `metrics_hint`/`access_hint` 에서 온다.
+③ 분석 한계와 KOA 대응(지금 쓸 수 있는 도구로 메우는 방법) ④ 다음 단계(MCP 만). 문구는 `catalog.yaml` 의
+`gap_advice`(한계별 영향·workaround)와 구성요소의 `fallback` 에서 온다. 클러스터 설정 변경은 제안하지 않는다.
 
 필요: `kubectl`, `python3` + PyYAML, 읽기 전용 kubeconfig(`~/.kube/hermes-readonly.yaml`, 만드는 법은 루트 README).
 
