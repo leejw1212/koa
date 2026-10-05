@@ -167,7 +167,7 @@ mcp_servers:
         resources: false
 
   prometheus:
-    status: candidate
+    status: verified   # 2026-10-05 kind-lab: 도구 6개 중 5개 노출(health_check 제외), execute_query 실제 조회 확인, admin API 는 서버에서 꺼져 있음
     when: component:prometheus
     requires_env: [PROMETHEUS_URL]
     url_env: PROMETHEUS_URL
@@ -184,11 +184,11 @@ mcp_servers:
         resources: false
 
   grafana:
-    status: candidate
+    status: verified   # 2026-10-05 kind-lab: --disable-write 에서도 도구 62개 → 분석용 조회 도구만 include. Viewer 토큰으로 대시보드·폴더 생성 403 확인
     when: component:grafana
     requires_env: [GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN]
     url_env: GRAFANA_URL
-    note: --disable-write 로 쓰기 도구 미등록. 서비스 계정은 Viewer 역할. Prometheus·Loki 를 Grafana 데이터소스로 함께 조회할 수 있다
+    note: --disable-write + Viewer 서비스 계정 + 조회 도구만. Grafana 데이터소스(Prometheus·Loki·Tempo)를 한곳에서 조회
     server:
       command: uvx
       args: [mcp-grafana@2.0.0, --disable-write]
@@ -196,6 +196,14 @@ mcp_servers:
         GRAFANA_URL: ${GRAFANA_URL}
         GRAFANA_SERVICE_ACCOUNT_TOKEN: ${GRAFANA_SERVICE_ACCOUNT_TOKEN}
       tools:
+        # 제외: alerting_manage_routing(이름상 관리 도구), grafana_api_request(GET 전용이지만 API 전체에 열림),
+        #       oncall·incident·pyroscope·tempo·provisioning·docs 등 이 분석 범위 밖 도구
+        include: [list_datasources, get_datasource, check_datasources_health,
+                  search_dashboards, get_dashboard_summary, get_dashboard_panel_queries, get_dashboard_property,
+                  query_prometheus, query_prometheus_histogram, list_prometheus_metric_names, list_prometheus_metric_metadata,
+                  list_prometheus_label_names, list_prometheus_label_values,
+                  query_loki_logs, query_loki_stats, query_loki_patterns, list_loki_label_names, list_loki_label_values,
+                  list_alert_groups, get_alert_group, alerting_rules_read, get_annotations]
         prompts: false
         resources: false
 
@@ -205,6 +213,9 @@ mcp_servers:
     requires_env: [ARGOCD_BASE_URL, ARGOCD_API_TOKEN]
     url_env: ARGOCD_BASE_URL
     note: MCP_READ_ONLY + 조회 도구만. 토큰은 읽기 전용 role(get/list) 계정으로 발급
+    # 2026-10-05 kind-lab: 토큰은 role:readonly 로 읽기만 됨(can-i sync/delete no) 확인. 하지만 MCP 가 base URL 의 경로를 버린다
+    #   (new URL('/api/v1/...', base) → http://localhost/api/v1/...). Argo CD 를 하위 경로(/argocd)로 연 클러스터에서는 쓸 수 없다.
+    url_must_be_root: true
     server:
       command: npx
       args: [-y, argocd-mcp@0.9.0, stdio]

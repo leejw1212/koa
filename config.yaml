@@ -47,6 +47,56 @@ mcp_servers:
         - ClusterHealthTool
       prompts: false
       resources: false
+  prometheus:
+    command: uvx
+    args:
+      - prometheus-mcp-server@1.6.2
+    env:
+      PROMETHEUS_URL: ${PROMETHEUS_URL}
+      PROMETHEUS_DISABLE_LINKS: "True"
+    tools:
+      include:
+        - execute_query
+        - execute_range_query
+        - list_metrics
+        - get_metric_metadata
+        - get_targets
+      prompts: false
+      resources: false
+  grafana:
+    command: uvx
+    args:
+      - mcp-grafana@2.0.0
+      - --disable-write
+    env:
+      GRAFANA_URL: ${GRAFANA_URL}
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: ${GRAFANA_SERVICE_ACCOUNT_TOKEN}
+    tools:
+      prompts: false
+      resources: false
+      include:
+        - list_datasources
+        - get_datasource
+        - check_datasources_health
+        - search_dashboards
+        - get_dashboard_summary
+        - get_dashboard_panel_queries
+        - get_dashboard_property
+        - query_prometheus
+        - query_prometheus_histogram
+        - list_prometheus_metric_names
+        - list_prometheus_metric_metadata
+        - list_prometheus_label_names
+        - list_prometheus_label_values
+        - query_loki_logs
+        - query_loki_stats
+        - query_loki_patterns
+        - list_loki_label_names
+        - list_loki_label_values
+        - list_alert_groups
+        - get_alert_group
+        - alerting_rules_read
+        - get_annotations
 terminal:
   shell_init_files:
     - ~/.profile

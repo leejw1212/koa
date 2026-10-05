@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -70,12 +71,17 @@ def build_plan(profile, catalog, with_names):
                 item["todo"].append("%s 제안값: %s" % (m["url_env"], urls[0]))
             if not urls and m.get("url_env"):
                 item["todo"].append("클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 %s 에 직접 지정)" % m["url_env"])
+            if m.get("url_must_be_root") and urls and all(urlparse(u).path.strip("/") for u in urls):
+                item["todo"].append("접근 주소가 하위 경로(%s)인데 이 MCP 는 경로를 버리고 호스트 루트로 요청한다 → 지금 범위에서는 붙일 수 없다" % urls[0])
+                item["blocked"] = True
         if name in current:
             item["state"] = "등록됨 (동일)" if current[name] == m["server"] else "등록됨 (카탈로그와 다름 → --apply 시 갱신)"
         else:
             item["state"] = "미등록"
         if item["state"] == "등록됨 (동일)":
             item["action"] = "유지"
+        elif item.get("blocked"):
+            item["action"] = "보류 (붙일 수 없음)"
         elif item["todo"] and not (name in current and not missing):
             item["action"] = "보류 (준비 필요)"
         elif m["status"] == "verified" or name in with_names:

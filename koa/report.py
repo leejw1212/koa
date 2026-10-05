@@ -118,8 +118,9 @@ def build(profile, catalog, probed=True):
     L.append("\n## 4. 다음 단계 (MCP)\n")
     ready = [it for it in items if it["action"] == "등록"]
     need_cred = [it for it in items if it["action"].startswith("보류 (준비")
+                 and not it.get("blocked")
                  and not any("접근 주소가 없다" in t for t in it["todo"])]
-    unreachable = [it for it in items if any("접근 주소가 없다" in t for t in it["todo"])]
+    unreachable = [it for it in items if any("접근 주소가 없다" in t for t in it["todo"]) or it.get("blocked")]
     nxt = []
     if ready:
         nxt.append("바로 등록할 수 있다: %s → `python3 koa/plan.py %s --apply`" % (", ".join("`%s`" % it["name"] for it in ready), profile["cluster"]))
@@ -129,7 +130,8 @@ def build(profile, catalog, probed=True):
         nxt.append("`%s` — 접속 정보(%s)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다%s. 근거: %s"
                    % (it["name"], ", ".join(envs) or "-", (" (" + hint[0] + ")") if hint else "", it["note"].split(".")[0]))
     for it in unreachable:
-        nxt.append("`%s` — 클러스터 밖 접근 주소가 없어 지금 범위에서는 붙일 수 없다. 3절의 대응 방법으로 본다" % it["name"])
+        why = next((t for t in it["todo"] if "붙일 수 없다" in t), "클러스터 밖 접근 주소가 없어 지금 범위에서는 붙일 수 없다")
+        nxt.append("`%s` — %s. 3절의 대응 방법으로 본다" % (it["name"], why))
     if not nxt:
         nxt.append("지금 범위에서 더 붙일 MCP 가 없다.")
     nxt.append("접속 정보를 넣은 뒤 `python3 koa/plan.py %s --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다" % profile["cluster"])

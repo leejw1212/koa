@@ -151,9 +151,9 @@ gaps: [...]
 |---|---|---|---|---|
 | kubernetes | `mcp-server-kubernetes@4.1.9` | k8s 조회 권한 | **verified** | 읽기 전용 SA kubeconfig, `ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS`, 조회 도구 4개만 |
 | opensearch | `opensearch-mcp-server-py@0.11.0` | opensearch 감지 | **verified** | `OPENSEARCH_SETTINGS_ALLOW_WRITE=false`, 조회 도구 5개만, OpenSearch 읽기 전용 역할 |
-| prometheus | `prometheus-mcp-server@1.6.2` | prometheus 감지 | candidate | PromQL 은 쓰기를 표현할 수 없음, 조회 도구만 |
-| grafana | `mcp-grafana@2.0.0` | grafana 감지 | candidate | `--disable-write`, Viewer 서비스 계정 |
-| argocd | `argocd-mcp@0.9.0` | argocd 감지 | candidate | `MCP_READ_ONLY=true`, 조회 도구 5개만, get/list role 토큰 |
+| prometheus | `prometheus-mcp-server@1.6.2` | prometheus 감지 | **verified** | PromQL 은 쓰기를 표현할 수 없음, 조회 도구만 |
+| grafana | `mcp-grafana@2.0.0` | grafana 감지 | **verified** | `--disable-write`, Viewer 서비스 계정, 조회 도구 22개만 |
+| argocd | `argocd-mcp@0.9.0` | argocd 감지 | candidate (하위 경로 URL 불가) | `MCP_READ_ONLY=true`, 조회 도구 5개만, get/list role 토큰 |
 | rabbitmq | `amq-mcp-server-rabbitmq@4.0.0` | rabbitmq 감지 | candidate | `--allow-mutative-tools` 없음, read/observability/health 그룹만, monitoring 태그 계정 |
 
 모든 서버에 `prompts: false`, `resources: false` 를 둔다.
@@ -271,7 +271,36 @@ gaps: [...]
 Prometheus 수집 여부는 `--probe` 이고 Prometheus 가 인증 없이 열려 있을 때 `/api/v1/targets` 를 읽어 판단한다.
 수집 대상의 namespace + service(또는 파드 이름 접두어)가 구성요소와 맞으면 수집 중으로 본다.
 
-## 12. 다음 단계
+## 12. MCP 붙이기 결과 (2026-10-05)
+
+kind-lab 테스트 클러스터라 토큰을 직접 발급했다(실제 클러스터에서는 사용자에게 받는다).
+발급 스크립트 `lab/kind-lab-tokens.py`, 권한 확인 `lab/kind-lab-verify-tokens.py`, 도구 목록 점검 `koa/check_mcp.py`.
+
+| MCP | 계정 / 토큰 | 권한 확인 | 실제 도구 → 노출 | 결과 |
+|---|---|---|---|---|
+| prometheus | 인증 없음 (`PROMETHEUS_URL`) | 조회 200, admin API 는 서버에서 꺼짐 | 6 → 5 (`health_check` 제외) | **verified**, 등록 |
+| grafana | 서비스 계정 `koa-readonly` (Viewer) | 조회 200, 대시보드·폴더 생성 403 | 62 → 22 조회 도구 | **verified**, 등록 |
+| argocd | 로컬 계정 `koa-readonly` (`role:readonly`, apiKey) | 앱 3개 조회, can-i sync·delete·create·update 모두 no | 11 → 5 | **붙일 수 없음** |
+
+발견한 것
+
+1. **grafana 는 `--disable-write` 로도 도구가 62개다.** oncall·incident·pyroscope·provisioning 같은 범위 밖 도구와
+   `alerting_manage_routing`(이름상 관리 도구), `grafana_api_request`(GET 전용이지만 API 전체에 열림)가 들어 있다.
+   분석용 조회 도구 22개만 `include` 로 남겼다. README 만 보고 붙였다면 62개가 그대로 노출됐다.
+2. **argocd-mcp 0.9.0 은 base URL 의 경로를 버린다.** `ARGOCD_BASE_URL=http://localhost/argocd` 인데
+   `http://localhost/api/v1/applications` 로 요청해 같은 호스트의 다른 앱(echo)이 응답했다.
+   Argo CD 를 하위 경로로 연 클러스터에서는 쓸 수 없어 등록을 되돌렸다. 카탈로그에 `url_must_be_root: true` 를 두고,
+   `plan.py` 가 접근 주소가 하위 경로면 "붙일 수 없음" 으로 판정하게 했다.
+3. 토큰 권한 확인은 쓰기를 실제로 시도하지 않는 방법을 우선했다 (Argo CD `can-i` API). Grafana 는 생성 요청을 보내
+   403 을 확인했고, 만약 성공했다면 바로 지우도록 했다.
+
+클러스터 쪽 변경 (lab 이라 우리가 했다): Argo CD `argocd-cm` 에 `accounts.koa-readonly: apiKey`,
+`argocd-rbac-cm` 에 `g, koa-readonly, role:readonly`. Grafana 서비스 계정 `koa-readonly`(Viewer).
+argocd 토큰은 `.env` 에 남아 있지만 쓰는 MCP 가 없다.
+
+적용: `~/.local/bin/hermes gateway restart` → prometheus·grafana MCP 프로세스가 새로 뜬 것 확인. 데스크톱 앱은 재시작해야 반영된다.
+
+## 13. 다음 단계
 
 1. candidate 를 하나씩 verified 로 올린다 (argocd 부터).
    읽기 전용 계정 발급 → `.env` → `--apply --with` → 도구 목록과 쓰기 거부 확인 → `status: verified`.

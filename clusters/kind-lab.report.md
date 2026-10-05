@@ -1,6 +1,6 @@
 # KOA 탐색 결과 — kind-lab
 
-> 2026-10-05T02:38:03Z · 계정 `system:serviceaccount:hermes:hermes-readonly` · 읽기 전용 ✅
+> 2026-10-05T02:49:04Z · 계정 `system:serviceaccount:hermes:hermes-readonly` · 읽기 전용 ✅
 
 | 항목 | 값 |
 |---|---|
@@ -36,9 +36,9 @@
 |---|---|---|---|---|---|
 | kubernetes | verified | k8s 조회 권한 있음 | 등록됨 (동일) | 유지 | - |
 | opensearch | verified | opensearch 감지 | 등록됨 (동일) | 유지 | - |
-| prometheus | candidate | prometheus 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: PROMETHEUS_URL; PROMETHEUS_URL 제안값: http://localhost/prometheus |
-| grafana | candidate | grafana 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN; GRAFANA_URL 제안값: http://localhost/grafana |
-| argocd | candidate | argocd 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: ARGOCD_BASE_URL, ARGOCD_API_TOKEN; ARGOCD_BASE_URL 제안값: http://localhost/argocd |
+| prometheus | verified | prometheus 감지 | 등록됨 (동일) | 유지 | - |
+| grafana | verified | grafana 감지 | 등록됨 (동일) | 유지 | - |
+| argocd | candidate | argocd 감지 | 미등록 | 보류 | 접근 주소가 하위 경로(http://localhost/argocd)인데 이 MCP 는 경로를 버리고 호스트 루트로 요청한다 → 지금 범위에서는 붙일 수 없다 |
 | rabbitmq | candidate | rabbitmq 감지 | 미등록 | 보류 | ~/.hermes/.env 에 값 채우기: RABBITMQ_MANAGEMENT_ENDPOINT; 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정) |
 | fluentd | - | fluentd 감지 | - | 붙이지 않음 | 전용 MCP 없음 → kubernetes MCP 로 파드 로그를 본다 |
 | redis | - | redis 감지 | - | 붙이지 않음 | 카탈로그에 없음 → kubernetes MCP 로 파드 로그를 본다 |
@@ -99,8 +99,6 @@ KOA 는 클러스터 설정을 바꾸지 않는다. 아래는 이 클러스터�
 
 ## 4. 다음 단계 (MCP)
 
-1. `prometheus` — 접속 정보(PROMETHEUS_URL)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다 (PROMETHEUS_URL 제안값: http://localhost/prometheus). 근거: PromQL 은 쓰기를 표현할 수 없어 도구 자체가 읽기 전용
-2. `grafana` — 접속 정보(GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다 (GRAFANA_URL 제안값: http://localhost/grafana). 근거: --disable-write 로 쓰기 도구 미등록
-3. `argocd` — 접속 정보(ARGOCD_BASE_URL, ARGOCD_API_TOKEN)를 받아 `~/.hermes/.env` 에 넣으면 붙일 수 있다 (ARGOCD_BASE_URL 제안값: http://localhost/argocd). 근거: MCP_READ_ONLY + 조회 도구만
-4. `rabbitmq` — 클러스터 밖 접근 주소가 없어 지금 범위에서는 붙일 수 없다. 3절의 대응 방법으로 본다
-5. 접속 정보를 넣은 뒤 `python3 koa/plan.py kind-lab --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다
+1. `argocd` — 접근 주소가 하위 경로(http://localhost/argocd)인데 이 MCP 는 경로를 버리고 호스트 루트로 요청한다 → 지금 범위에서는 붙일 수 없다. 3절의 대응 방법으로 본다
+2. `rabbitmq` — 클러스터 밖 접근 주소가 없다 → 지금 범위에서는 붙일 수 없다 (주소를 따로 알면 RABBITMQ_MANAGEMENT_ENDPOINT 에 직접 지정). 3절의 대응 방법으로 본다
+3. 접속 정보를 넣은 뒤 `python3 koa/plan.py kind-lab --apply --with <이름>` → 앱 재시작 → 도구 목록과 쓰기 거부를 확인하고 verified 로 올린다
