@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KOA</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #fff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+  --accent: #2f5fd0; --accent-ink: #fff; --ok: #1f7a4d; --warn: #a3610a; --err: #b42318; --chip: #eef1f8;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9a9993; --line: #34332f;
+    --accent: #7ea2ff; --accent-ink: #10131a; --ok: #5cc28f; --warn: #e0a24a; --err: #f07a6e; --chip: #262b38; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+header b { font-size: 16px; letter-spacing: .5px; }
+nav { display: flex; gap: 4px; }
+nav button { background: none; border: 0; padding: 6px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
+nav button.on { background: var(--chip); color: var(--ink); font-weight: 600; }
+main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 80px; }
+section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+h2 { font-size: 15px; margin: 0 0 4px; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 100%; }
+textarea { font-family: var(--mono); font-size: 13px; }
+input[type=checkbox] { width: auto; }
+button.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 6px; }
+button.x:hover { color: var(--err); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 4px 4px; }
+td { padding: 3px 4px; vertical-align: top; }
+.tablewrap { overflow-x: auto; }
+.tablewrap table { min-width: 760px; }
+.flow { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0 4px; font-size: 13px; }
+.chain .n { background: var(--chip); border-radius: 12px; padding: 1px 10px; }
+.chain .n.ext { border: 1px dashed var(--muted); background: none; }
+.chain .n.unk { outline: 1px solid var(--warn); }
+.chain .e { color: var(--muted); font-size: 12px; }
+.checks div { font-size: 13px; }
+.lv-error { color: var(--err); } .lv-warn { color: var(--warn); } .lv-ok { color: var(--ok); }
+pre { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 0; }
+.list .item { display: flex; gap: 10px; padding: 8px 6px; border-bottom: 1px solid var(--line); cursor: pointer; align-items: baseline; }
+.list .item:hover { background: var(--chip); }
+.tag { font-size: 11.5px; border-radius: 10px; padding: 0 8px; background: var(--chip); white-space: nowrap; }
+.tag.done { color: var(--ok); } .tag.failed { color: var(--err); } .tag.running { color: var(--warn); }
+.muted { color: var(--muted); }
+#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 8px; display: none; z-index: 9; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+label.f { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.empty { color: var(--muted); padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <b>KOA</b>
+  <div class="row"><span class="muted">클러스터</span>
+    <select id="cluster" style="width:auto"></select>
+    <button class="btn" id="newCluster">+ 새 클러스터</button>
+  </div>
+  <nav id="tabs">
+    <button data-tab="ask" class="on">조사 요청</button>
+    <button data-tab="results">결과</button>
+    <button data-tab="knowledge">클러스터 지식</button>
+    <button data-tab="incidents">과거 이슈</button>
+  </nav>
+</header>
+<main>
+
+<!-- 조사 요청 -->
+<div id="tab-ask">
+  <section class="card">
+    <h2>무엇이 문제인가요?</h2>
+    <p class="hint">평소 말로 쓰면 됩니다. 예: "rmq 소비가 안 되는데 어디가 문제야?", "주문 API 가 30분 전부터 느려". 클러스터 지식으로 대상·증상·확인 순서를 바로 정리해 보여 줍니다.</p>
+    <textarea id="q" rows="3" placeholder="rmq 소비가 안 되는데 어디가 문제야?"></textarea>
+    <div class="row" style="margin-top:8px">
+      <span class="muted">기간</span><input id="since" style="width:90px" placeholder="자동">
+      <span class="muted">조회 방법</span>
+      <select id="source" style="width:auto"><option value="mcp">kubernetes MCP</option><option value="kubectl">읽기 전용 kubectl</option></select>
+      <label class="row" style="gap:4px"><input type="checkbox" id="runTriage" checked> 트리아지 바로 실행</label>
+      <span class="grow"></span>
+      <button class="btn primary" id="submit">요청 저장</button>
+    </div>
+  </section>
+  <section class="card">
+    <h2>조사 계획 미리보기</h2>
+    <p class="hint">틀렸으면 질문을 고치거나, 클러스터 지식의 구성요소 별칭(aliases)을 늘리세요.</p>
+    <pre id="planPreview" class="muted">질문을 쓰면 여기에 나옵니다.</pre>
+  </section>
+</div>
+
+<!-- 결과 -->
+<div id="tab-results" hidden>
+  <section class="card" id="resultList"></section>
+  <div id="resultDetail"></div>
+</div>
+
+<!-- 클러스터 지식 -->
+<div id="tab-knowledge" hidden>
+  <section class="card">
+    <div class="row"><h2 class="grow">검사</h2><span class="muted" id="kpath"></span></div>
+    <div class="checks" id="checks"></div>
+  </section>
+  <section class="card">
+    <h2>구성요소</h2>
+    <p class="hint">사람이 부르는 이름 → k8s 워크로드(<code>네임스페이스/종류/이름</code>). 별칭은 질문 속 단어를 찾는 데 씁니다 (쉼표로 구분). 클러스터 밖(DB 등)은 "밖"에 체크하고, 호출하는 쪽 로그에 남는 오류 문구를 적어 주세요.</p>
+    <div class="tablewrap"><table id="compTable">
+      <thead><tr><th style="width:15%">이름</th><th style="width:24%">워크로드</th><th style="width:12%">종류</th><th style="width:9%">중요도</th><th>별칭</th><th style="width:4%">밖</th><th style="width:18%">밖일 때 로그 문구</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <button class="btn" id="addComp" style="margin-top:8px">+ 구성요소</button>
+  </section>
+  <section class="card">
+    <h2>흐름</h2>
+    <p class="hint">요청이 지나가는 길을 순서대로. 역할: <b>call</b> 동기 호출, <b>produce</b> 큐에 넣기, <b>consume</b> 큐에서 꺼내기. 분석은 이 길을 따라 "정상 → 비정상으로 바뀌는 첫 지점"을 찾습니다.</p>
+    <div id="flows"></div>
+    <button class="btn" id="addFlow">+ 흐름</button>
+  </section>
+  <section class="card">
+    <h2>정상 패턴</h2>
+    <p class="hint">정상인데 이상해 보이는 것 (오탐 줄이기). 예: 매일 02:00 배치 때 큐가 쌓였다 빠진다.</p>
+    <table id="normalTable"><thead><tr><th style="width:22%">구성요소</th><th>설명</th><th></th></tr></thead><tbody></tbody></table>
+    <button class="btn" id="addNormal" style="margin-top:8px">+ 정상 패턴</button>
+  </section>
+  <div class="row" style="margin-bottom:16px">
+    <button class="btn primary" id="saveFlows">구조 저장 (flows.yaml)</button>
+    <button class="btn" id="toggleRaw">YAML 직접 편집</button>
+    <span class="muted" id="savedAt"></span>
+  </div>
+  <section class="card" id="rawCard" hidden>
+    <h2>flows.yaml</h2>
+    <p class="hint">직접 고치고 저장하면 위 화면도 이 내용으로 다시 읽습니다. 저장 전 파일은 flows.yaml.bak 으로 남습니다.</p>
+    <textarea id="raw" rows="24"></textarea>
+    <button class="btn primary" id="saveRaw" style="margin-top:8px">YAML 저장</button>
+  </section>
+  <section class="card">
+    <h2>구조 설명 (architecture.md)</h2>
+    <p class="hint">자유롭게 씁니다. 분석 때 대상 구성요소 이름이 나오는 단락만 참고로 읽습니다.</p>
+    <textarea id="arch" rows="16"></textarea>
+    <button class="btn primary" id="saveArch" style="margin-top:8px">설명 저장</button>
+  </section>
+</div>
+
+<!-- 과거 이슈 -->
+<div id="tab-incidents" hidden>
+  <section class="card">
+    <div class="row"><h2 class="grow">과거 이슈</h2><button class="btn" id="newInc">+ 새 이슈</button></div>
+    <p class="hint">1건 = 파일 1개. "먼저 볼 로그 문구"가 다음 분석의 1순위 확인 항목이 됩니다. 모르는 칸은 비워 두세요.</p>
+    <div class="list" id="incList"></div>
+  </section>
+  <section class="card" id="incForm" hidden>
+    <h2 id="incTitle">새 이슈</h2>
+    <div class="grid2">
+      <div><label class="f">날짜</label><input id="i-date" type="date"></div>
+      <div><label class="f">증상 유형</label><select id="i-symptom"></select></div>
+      <div><label class="f">관련 구성요소 (쉼표)</label><input id="i-components" list="compNames"></div>
+      <div><label class="f">찾은 방법</label><input id="i-found" placeholder="rabbitmq 파드 로그의 alarm 문구"></div>
+    </div>
+    <div style="margin-top:8px"><label class="f">원인</label><input id="i-cause" placeholder="rabbitmq PVC 90% → 디스크 알람 → 생산자 차단"></div>
+    <div style="margin-top:8px"><label class="f">먼저 볼 로그 문구 (한 줄에 하나)</label><textarea id="i-sig" rows="3"></textarea></div>
+    <div style="margin-top:8px"><label class="f">메모</label><textarea id="i-body" rows="5"></textarea></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn primary" id="saveInc">저장</button>
+      <button class="btn" id="delInc">삭제</button>
+      <span class="muted" id="incFile"></span>
+    </div>
+  </section>
+</div>
+
+<div id="empty" class="empty" hidden></div>
+</main>
+<datalist id="compNames"></datalist>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (s, el) => (el || document).querySelector(s);
+const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const S = { cluster: null, k: null, symptoms: [], tab: "ask", incFile: null, poll: null };
+
+function toast(msg, ms) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", ms || 2200); }
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-KOA": "1" }, body: JSON.stringify(body) };
+  const r = await fetch("/api/" + path, opt);
+  const j = await r.json().catch(() => ({ error: "응답 오류" }));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const store = { get(k) { try { return localStorage.getItem("koa." + k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem("koa." + k, v); } catch (e) {} } };
+
+// ---------- 탭 / 클러스터 ----------
+function showTab(t) {
+  S.tab = t; store.set("tab", t);
+  $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  ["ask", "results", "knowledge", "incidents"].forEach(x => $("#tab-" + x).hidden = x !== t);
+  const needK = (t === "knowledge" || t === "incidents") && !S.k;
+  $("#empty").hidden = !needK;
+  if (needK) { $("#tab-" + t).hidden = true; $("#empty").innerHTML = S.cluster ? "이 클러스터에는 아직 지식이 없습니다." : "먼저 <b>+ 새 클러스터</b> 로 클러스터 지식을 만드세요. 템플릿 예시가 채워진 채로 시작합니다."; }
+  if (t === "results") loadResults();
+  clearInterval(S.poll);
+}
+$$("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+async function loadClusters(select) {
+  const j = await api("clusters");
+  S.symptoms = j.symptoms;
+  $("#i-symptom").innerHTML = '<option value="">(모름)</option>' + j.symptoms.map(s => `<option>${esc(s)}</option>`).join("");
+  const sel = $("#cluster");
+  sel.innerHTML = j.clusters.map(c => `<option>${esc(c)}</option>`).join("") || '<option value="">(없음)</option>';
+  const want = select || store.get("cluster");
+  if (want && j.clusters.includes(want)) sel.value = want;
+  await setCluster(sel.value || null);
+}
+$("#cluster").onchange = e => setCluster(e.target.value);
+$("#newCluster").onclick = async () => {
+  const name = prompt("클러스터 이름 (영문·숫자·_.-). 트리아지 결과 이름과 같게 하세요 (예: kind-lab, prod-a)");
+  if (!name) return;
+  try { await api("clusters", { name }); toast("만들었습니다: 템플릿 예시를 실제 내용으로 바꾸세요"); await loadClusters(name); showTab("knowledge"); }
+  catch (e) { toast(e.message, 4000); }
+};
+
+async function setCluster(c) {
+  S.cluster = c; S.k = null;
+  if (c) { store.set("cluster", c); try { S.k = await api("knowledge/" + encodeURIComponent(c)); } catch (e) { S.k = null; } }
+  renderKnowledge(); renderIncidents(); previewPlan(); showTab(S.tab);
+}
+
+// ---------- 지식: 구성요소 ----------
+const csv = v => (v || []).join(", ");
+const uncsv = s => s.split(",").map(x => x.trim()).filter(Boolean);
+function compRow(name, c, isNew) {
+  c = c || {};
+  const ph = t => isNew ? ` placeholder="${t}"` : "";
+  const tr = document.createElement("tr");
+  tr._orig = c;
+  tr.innerHTML = `<td><input data-f="name" value="${esc(name)}"></td>
+    <td><input data-f="workload" value="${esc(c.workload)}"${ph("shop/Deployment/order-api")}></td>
+    <td><input data-f="kind" value="${esc(c.kind)}"${ph("message-queue")}></td>
+    <td><select data-f="tier"><option value=""></option>${["critical","normal","batch"].map(t => `<option ${c.tier===t?"selected":""}>${t}</option>`).join("")}</select></td>
+    <td><input data-f="aliases" value="${esc(csv(c.aliases))}"${ph("rmq, 래빗")}></td>
+    <td style="text-align:center"><input type="checkbox" data-f="external" ${c.external ? "checked" : ""}></td>
+    <td><input data-f="log_signatures" value="${esc(csv(c.log_signatures))}"${ph("Too many connections")}></td>
+    <td><button class="x" title="삭제">×</button></td>`;
+  $(".x", tr).onclick = () => { tr.remove(); refreshNames(); };
+  $$("input", tr).forEach(i => i.addEventListener("change", refreshNames));
+  return tr;
+}
+function readComps() {
+  const out = {};
+  $$("#compTable tbody tr").forEach(tr => {
+    const g = f => $(`[data-f=${f}]`, tr);
+    const name = g("name").value.trim(); if (!name) return;
+    const c = Object.assign({}, tr._orig);
+    const set = (k, v) => { if (v === "" || v === false || (Array.isArray(v) && !v.length)) delete c[k]; else c[k] = v; };
+    set("workload", g("workload").value.trim()); set("kind", g("kind").value.trim()); set("tier", g("tier").value);
+    set("aliases", uncsv(g("aliases").value)); set("external", g("external").checked); set("log_signatures", uncsv(g("log_signatures").value));
+    if (c.external) delete c.workload;
+    out[name] = c;
+  });
+  return out;
+}
+function refreshNames() {
+  const comps = readComps();
+  $("#compNames").innerHTML = Object.keys(comps).map(n => `<option value="${esc(n)}">`).join("");
+  $$("#flows .flow").forEach(f => drawChain(f, comps));
+}
+
+// ---------- 지식: 흐름 ----------
+function hopRow(e, isNew) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><input data-f="from" list="compNames" value="${esc(e.from)}"></td>
+    <td><select data-f="role">${["call","produce","consume"].map(r => `<option ${e.role===r?"selected":""}>${r}</option>`).join("")}</select></td>
+    <td><input data-f="to" list="compNames" value="${esc(e.to)}"></td>
+    <td><input data-f="via" value="${esc(e.via)}"${isNew ? ' placeholder="queue order.created"' : ""}></td>
+    <td><button class="x" title="삭제">×</button></td>`;
+  $(".x", tr).onclick = () => { const f = tr.closest(".flow"); tr.remove(); drawChain(f); };
+  $$("input,select", tr).forEach(i => i.addEventListener("input", () => drawChain(tr.closest(".flow"))));
+  return tr;
+}
+function flowBox(name, flow, es) {
+  const d = document.createElement("div");
+  d.className = "flow"; d._orig = flow || {};
+  d.innerHTML = `<div class="row"><input data-f="fname" class="grow" style="max-width:240px" value="${esc(name)}" placeholder="흐름 이름 (예: order-async)">
+      <select data-f="fkind" style="width:auto">${["http","queue","batch","other"].map(k => `<option ${(flow||{}).kind===k?"selected":""}>${k}</option>`).join("")}</select>
+      <span class="grow"></span><button class="btn" data-a="add">+ 구간</button><button class="x" data-a="del" title="흐름 삭제">×</button></div>
+    <div class="chain"></div>
+    <div class="tablewrap"><table><thead><tr><th>어디서</th><th style="width:110px">역할</th><th>어디로</th><th>무엇으로 (선택)</th><th></th></tr></thead><tbody></tbody></table></div>`;
+  const tb = $("tbody", d);
+  (es && es.length ? es : [{ from: "", to: "", role: "call", via: "" }]).forEach(e => tb.appendChild(hopRow(e, !(es && es.length))));
+  $("[data-a=add]", d).onclick = () => { const rows = $$("tbody tr", d); const last = rows.length ? $("[data-f=to]", rows[rows.length - 1]).value : ""; tb.appendChild(hopRow({ from: last, to: "", role: "call", via: "" }, true)); drawChain(d); };
+  $("[data-a=del]", d).onclick = () => { if (confirm("이 흐름을 지울까요? (저장해야 반영)")) d.remove(); };
+  return d;
+}
+function readEdges(d) {
+  return $$("tbody tr", d).map(tr => ({ from: $("[data-f=from]", tr).value.trim(), to: $("[data-f=to]", tr).value.trim(), role: $("[data-f=role]", tr).value, via: $("[data-f=via]", tr).value.trim() })).filter(e => e.from || e.to);
+}
+function drawChain(d, comps) {
+  if (!d) return;
+  comps = comps || readComps();
+  const es = readEdges(d);
+  const node = n => { const c = comps[n]; const cls = !c ? "unk" : c.external ? "ext" : ""; return `<span class="n ${cls}" title="${esc(c ? (c.workload || "클러스터 밖") : "구성요소에 없음")}">${esc(n)}</span>`; };
+  let html = "", prev = null;
+  es.forEach(e => {
+    if (e.from !== prev) { if (prev !== null) html += '<span class="e">│</span>'; html += node(e.from); }
+    if (e.to) html += `<span class="e">─${esc(e.role)}${e.via ? " · " + esc(e.via) : ""}→</span>` + node(e.to);
+    prev = e.to || e.from;
+  });
+  $(".chain", d).innerHTML = html || '<span class="muted">구간을 넣으면 여기에 그려집니다</span>';
+}
+function serializeFlow(d) {
+  const es = readEdges(d);
+  const f = Object.assign({}, d._orig);
+  f.kind = $("[data-f=fkind]", d).value;
+  const chain = es.length && es.every((e, i) => e.role === "call" && !e.via && (i === 0 || es[i - 1].to === e.from) && (e.to || es.length === 1));
+  if (chain) f.hops = [es[0].from].concat(es.filter(e => e.to).map(e => e.to));
+  else f.hops = es.map(e => { const h = { from: e.from, to: e.to }; if (e.via) h.via = e.via; h.role = e.role; return h; });
+  return f;
+}
+
+// ---------- 지식: 정상 패턴 ----------
+function normalRow(n) {
+  const tr = document.createElement("tr"); tr._orig = n || {};
+  tr.innerHTML = `<td><input data-f="component" list="compNames" value="${esc((n||{}).component)}"></td><td><input data-f="note" value="${esc((n||{}).note)}"></td><td><button class="x">×</button></td>`;
+  $(".x", tr).onclick = () => tr.remove();
+  return tr;
+}
+
+function renderChecks(list) {
+  $("#checks").innerHTML = list && list.length ? list.map(c => `<div class="lv-${c.level}">${c.level === "error" ? "❌" : "⚠"} ${esc(c.msg)}</div>`).join("") : '<div class="lv-ok">✅ 문제 없음</div>';
+}
+function renderKnowledge() {
+  const k = S.k; if (!k) return;
+  $("#kpath").textContent = k.path;
+  renderChecks(k.check);
+  const tb = $("#compTable tbody"); tb.innerHTML = "";
+  Object.entries(k.flows.components || {}).forEach(([n, c]) => tb.appendChild(compRow(n, c)));
+  const fl = $("#flows"); fl.innerHTML = "";
+  Object.entries(k.flows.flows || {}).forEach(([n, f]) => fl.appendChild(flowBox(n, f, k.edges[n])));
+  const nt = $("#normalTable tbody"); nt.innerHTML = "";
+  (k.flows.normal || []).forEach(n => nt.appendChild(normalRow(n)));
+  $("#raw").value = k.raw; $("#arch").value = k.architecture;
+  refreshNames();
+}
+$("#addComp").onclick = () => { $("#compTable tbody").appendChild(compRow("", {}, true)); };
+$("#addFlow").onclick = () => { const d = flowBox("", { kind: "http" }, null); $("#flows").appendChild(d); drawChain(d); };
+$("#addNormal").onclick = () => $("#normalTable tbody").appendChild(normalRow({}));
+$("#toggleRaw").onclick = () => { $("#rawCard").hidden = !$("#rawCard").hidden; };
+
+async function afterSave(res, what) {
+  renderChecks(res.check);
+  $("#savedAt").textContent = what + " 저장됨 " + new Date().toLocaleTimeString();
+  S.k = await api("knowledge/" + encodeURIComponent(S.cluster));
+  renderKnowledge(); previewPlan();
+}
+$("#saveFlows").onclick = async () => {
+  const flows = {};
+  for (const d of $$("#flows .flow")) {
+    const n = $("[data-f=fname]", d).value.trim();
+    if (!n) { toast("이름 없는 흐름이 있습니다"); return; }
+    flows[n] = serializeFlow(d);
+  }
+  const normal = $$("#normalTable tbody tr").map(tr => Object.assign({}, tr._orig, { component: $("[data-f=component]", tr).value.trim(), note: $("[data-f=note]", tr).value.trim() })).filter(n => n.component || n.note);
+  try { const r = await api(`knowledge/${encodeURIComponent(S.cluster)}/flows`, { data: { schema: S.k.flows.schema, components: readComps(), flows, normal } }); toast("저장했습니다"); await afterSave(r, "구조"); }
+  catch (e) { toast(e.message, 4000); }
+};
+$("#saveRaw").onclick = async () => {
+  try { const r = await api(`knowledge/${encodeURIComponent(S.cluster)}/flows`, { raw: $("#raw").value }); toast("저장했습니다"); await afterSave(r, "YAML"); }
+  catch (e) { toast("YAML 오류: " + e.message, 5000); }
+};
+$("#saveArch").onclick = async () => {
+  try { await api(`knowledge/${encodeURIComponent(S.cluster)}/architecture`, { text: $("#arch").value }); toast("저장했습니다"); }
+  catch (e) { toast(e.message, 4000); }
+};
+
+// ---------- 과거 이슈 ----------
+function renderIncidents() {
+  const k = S.k; if (!k) return;
+  $("#incList").innerHTML = k.incidents.map((i, n) => `<div class="item" data-n="${n}"><span class="muted">${esc(i.meta.date)}</span><span class="tag">${esc(i.meta.symptom || "?")}</span><span class="grow">${esc(i.meta.cause || i.file)}</span><span class="muted">${esc((i.meta.components || []).join(", "))}</span></div>`).join("") || '<div class="muted">아직 없습니다.</div>';
+  $$("#incList .item").forEach(el => el.onclick = () => editInc(k.incidents[+el.dataset.n]));
+  $("#incForm").hidden = true;
+}
+function editInc(i) {
+  S.incFile = i ? i.file : null; S.incOrig = i ? i.meta : {};
+  const m = (i && i.meta) || {};
+  $("#incTitle").textContent = i ? "이슈 고치기" : "새 이슈";
+  $("#i-date").value = m.date ? String(m.date).slice(0, 10) : new Date().toISOString().slice(0, 10);
+  $("#i-symptom").value = m.symptom || "";
+  $("#i-components").value = (m.components || []).join(", ");
+  $("#i-found").value = m.found_by || ""; $("#i-cause").value = m.cause || "";
+  $("#i-sig").value = ((m.signature || {}).logs || []).join("\n");
+  $("#i-body").value = i ? i.body : "";
+  $("#incFile").textContent = i ? i.file : "";
+  $("#delInc").hidden = !i;
+  $("#incForm").hidden = false; $("#incForm").scrollIntoView({ behavior: "smooth" });
+}
+$("#newInc").onclick = () => editInc(null);
+$("#saveInc").onclick = async () => {
+  const meta = Object.assign({}, S.incOrig, {
+    date: $("#i-date").value, symptom: $("#i-symptom").value, components: uncsv($("#i-components").value),
+    cause: $("#i-cause").value.trim(), found_by: $("#i-found").value.trim(),
+  });
+  const logs = $("#i-sig").value.split("\n").map(s => s.trim()).filter(Boolean);
+  meta.signature = Object.assign({}, (S.incOrig || {}).signature || {}); if (logs.length) meta.signature.logs = logs; else delete meta.signature.logs;
+  try {
+    await api(`knowledge/${encodeURIComponent(S.cluster)}/incidents`, { file: S.incFile, meta, body: $("#i-body").value });
+    toast("저장했습니다"); S.k = await api("knowledge/" + encodeURIComponent(S.cluster)); renderIncidents(); previewPlan();
+  } catch (e) { toast(e.message, 4000); }
+};
+$("#delInc").onclick = async () => {
+  if (!S.incFile || !confirm(S.incFile + " 를 지울까요?")) return;
+  try { await api(`knowledge/${encodeURIComponent(S.cluster)}/incidents/${encodeURIComponent(S.incFile)}/delete`, {}); S.k = await api("knowledge/" + encodeURIComponent(S.cluster)); renderIncidents(); }
+  catch (e) { toast(e.message, 4000); }
+};
+
+// ---------- 조사 요청 ----------
+let planTimer;
+function previewPlan() {
+  clearTimeout(planTimer);
+  planTimer = setTimeout(async () => {
+    const q = $("#q").value.trim(), pre = $("#planPreview");
+    if (!q) { pre.textContent = "질문을 쓰면 여기에 나옵니다."; pre.classList.add("muted"); return; }
+    if (!S.k) { pre.textContent = "이 클러스터에는 지식이 없어 트리아지만으로 봅니다."; return; }
+    try { const j = await api("plan", { cluster: S.cluster, question: q, since: $("#since").value }); pre.textContent = j.text || ""; pre.classList.remove("muted"); }
+    catch (e) { pre.textContent = e.message; }
+  }, 250);
+}
+$("#q").addEventListener("input", previewPlan);
+$("#since").addEventListener("input", previewPlan);
+$("#submit").onclick = async () => {
+  const q = $("#q").value.trim();
+  if (!q) { toast("질문을 써 주세요"); return; }
+  if (!S.cluster) { toast("먼저 클러스터를 만드세요"); return; }
+  try {
+    const j = await api("requests", { cluster: S.cluster, question: q, since: $("#since").value, triage: $("#runTriage").checked, source: $("#source").value });
+    $("#q").value = ""; previewPlan();
+    showTab("results"); openResult(S.cluster, j.id);
+  } catch (e) { toast(e.message, 4000); }
+};
+
+// ---------- 결과 ----------
+const stateTag = s => ({ running: '<span class="tag running">트리아지 중</span>', done: '<span class="tag done">트리아지 완료</span>', failed: '<span class="tag failed">트리아지 실패</span>' }[s] || '<span class="tag">트리아지 안 함</span>');
+async function loadResults() {
+  const j = await api("requests" + (S.cluster ? "?cluster=" + encodeURIComponent(S.cluster) : ""));
+  $("#resultList").innerHTML = '<h2>조사 요청</h2><p class="hint">KOA 채팅에 문장을 붙여 넣으면 분석하고 결과(report.md)를 이 폴더에 씁니다. 다 쓰면 여기에 보입니다.</p><div class="list">' +
+    (j.requests.map(r => `<div class="item" data-c="${esc(r.cluster)}" data-id="${esc(r.id)}"><span class="muted">${esc(fmtId(r.id))}</span><span class="grow">${esc(r.question)}</span>${stateTag(r.triage)}${r.report ? '<span class="tag done">분석 결과</span>' : ""}</div>`).join("") || '<div class="muted">아직 없습니다. 조사 요청 탭에서 시작하세요.</div>') + "</div>";
+  $$("#resultList .item").forEach(el => el.onclick = () => openResult(el.dataset.c, el.dataset.id));
+}
+function fmtId(id) { const m = id.match(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/); if (!m) return id; return new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6])).toLocaleString(); }
+async function openResult(c, id) {
+  clearInterval(S.poll);
+  const draw = async () => {
+    let r; try { r = await api(`requests/${encodeURIComponent(c)}/${encodeURIComponent(id)}`); } catch (e) { toast(e.message); return; }
+    $("#resultDetail").innerHTML = `
+      <section class="card"><div class="row"><h2 class="grow">${esc(r.plan.request)}</h2><span class="muted">${esc(r.path)}</span></div>
+        <p class="hint">KOA 채팅에 이 문장을 붙여 넣으세요</p>
+        <div class="row"><pre class="grow" id="prompt">${esc(r.prompt)}</pre><button class="btn" id="copy">복사</button></div></section>
+      <section class="card"><h2>분석 결과 (report.md)</h2>${r.report ? `<pre>${esc(r.report)}</pre>` : '<p class="muted">아직 없습니다. 위 문장을 KOA 채팅에 붙여 넣으면 분석 후 여기에 씁니다.</p>'}</section>
+      <section class="card"><h2>조사 계획</h2><pre>${esc(r.plan_text)}</pre></section>
+      <section class="card"><div class="row"><h2 class="grow">트리아지</h2>${stateTag(r.triage.state)}</div>
+        ${r.triage_text ? `<pre>${esc(r.triage_text)}</pre>` : r.triage.state === "running" ? '<p class="muted">kubernetes MCP 로 훑는 중…</p>' : '<p class="muted">실행하지 않았습니다.</p>'}</section>`;
+    $("#copy").onclick = () => { navigator.clipboard.writeText(r.prompt).then(() => toast("복사했습니다"), () => toast("복사 실패: 직접 선택하세요")); };
+    if (r.triage.state !== "running" && r.report) clearInterval(S.poll);
+    if (r.triage.state !== S.lastState) { S.lastState = r.triage.state; loadResults(); }
+  };
+  await draw();
+  S.poll = setInterval(draw, 3000);
+  $("#resultDetail").scrollIntoView({ behavior: "smooth" });
+}
+
+showTab(store.get("tab") || "ask");
+loadClusters();
+</script>
+</body>
+</html>

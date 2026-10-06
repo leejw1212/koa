@@ -21,6 +21,11 @@ else:
     HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
     CLUSTERS = REPO / "clusters"
 
+# 클러스터 지식(사람이 쓰는 것)과 조사 요청 기록. 두 경우 모두 저장소/프로필의 local/ (커밋 안 함, update 가 안 건드림)
+KNOWLEDGE = REPO / "local" / "knowledge"
+REQUESTS = REPO / "local" / "requests"
+KNOWLEDGE_TEMPLATE = REPO / "koa" / "templates" / "knowledge"
+
 ENV_FILE = HERMES_HOME / ".env"
 ENV_HINT = str(ENV_FILE).replace(str(Path.home()), "~", 1)  # 사용자에게 보여줄 경로
 CONFIG = HERMES_HOME / "config.yaml"
