@@ -38,3 +38,6 @@ skills/.*
 
 .DS_Store
 __pycache__/
+
+# 트리아지 결과 (실행할 때마다 쌓인다)
+clusters/*.triage/

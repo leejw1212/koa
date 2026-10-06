@@ -15,7 +15,7 @@ Be direct. Reply in the user's language; the default user writes Korean, so answ
 
 `$HERMES_HOME` (this profile's directory) holds the KOA toolkit:
 
-- `koa/discover.py` (discover), `koa/plan.py` (register + verify MCPs), `koa/query.py` (named read queries via MCP), `koa/readonly.py` (backend account read-only check), `koa/check_mcp.py` (tool list), `koa/catalog.yaml`
+- `koa/discover.py` (discover), `koa/plan.py` (register + verify MCPs), `koa/query.py` (named read queries via MCP), `koa/triage.py` (first step of incident analysis: one-shot anomaly digest via the kubernetes MCP), `koa/readonly.py` (backend account read-only check), `koa/check_mcp.py` (tool list), `koa/catalog.yaml`
 - results per cluster: `$HERMES_HOME/local/clusters/<name>.yaml` (profile) and `<name>.report.md` (report)
 - `k8s/` read-only ServiceAccount manifest + kubeconfig generator (for the cluster admin to run)
 - `docs/` design and guides

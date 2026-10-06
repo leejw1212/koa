@@ -13,6 +13,7 @@ python3 koa/query.py                 # 4) 등록된 MCP 별 조회 목록
 python3 koa/query.py prometheus firing                     #    이름 붙인 조회
 python3 koa/query.py kubernetes logs name=<pod> ns=<ns> tail=50
 python3 koa/query.py --probe         #    서버마다 조회 1개 → 표
+python3 koa/triage.py                # 5) 장애 분석 첫 단계: k8s MCP 로 전체를 훑어 이상 징후 요약 (--since 3h, --at <UTC>, --ns a,b)
 python3 koa/readonly.py [MCP...]     # (단독) 백엔드 계정이 읽기 전용인지
 python3 koa/check_mcp.py [MCP...]    # (단독) 실제 도구 목록과 include 비교
 python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
@@ -35,6 +36,7 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `catalog.yaml` | 무엇을 찾을지(구성요소 감지 규칙)와 찾으면 어떤 MCP 를 붙일지(서버 정의) |
 | `plan.py` | 프로필 + 카탈로그 → 설치 계획. `--apply` 는 `hermes config set mcp_servers.<이름>` 으로 등록 |
 | `query.py` | 카탈로그 `queries`(이름 붙인 조회)·`probe` 를 MCP 로 실행. `--call` 로 허용 목록 안 도구 직접 호출 |
+| `triage.py` | 장애 분석 첫 단계. kubernetes MCP(`kubectl_get` yaml)로 노드·파드·이벤트·워크로드·엔드포인트·변경을 한 번에 모아 점수순 이상 징후 + 변경 타임라인 + 다음 조회를 낸다. 결과 JSON 은 `<결과>/<이름>.triage/` |
 | `readonly.py` | MCP 계정이 읽기 전용인지 백엔드 권한 질의로 확인 (쓰기 시도 없음). ok / warn / fail / skip |
 | `mcp_client.py` | MCP 서버를 Hermes 와 같은 방식(stdio)으로 띄우는 최소 클라이언트. 허용 목록 밖 도구는 거부 |
 | `check_mcp.py` | MCP 서버를 stdio 로 띄워 실제 도구 목록과 `include` 비교 |

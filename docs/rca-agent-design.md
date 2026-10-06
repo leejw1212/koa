@@ -222,7 +222,7 @@ kind-lab 에 장애를 일부러 넣고(lab 에서만) 시간을 잰다. 같은 
 | # | 내용 | 산출물 | 확인 |
 |---|---|---|---|
 | 1 | 구조 설명 형식 + `context.py draft/check` | `koa/context.py`, 스키마, kind-lab 예시 | kind-lab 에서 초안 생성·불일치 검출 |
-| 2 | 트리아지 (k8s MCP 만) | `koa/triage.py` | 장애 장면 2개에서 요약에 원인 징후가 상위에 오는지 |
+| 2 | 트리아지 (k8s MCP 만) ✅ 2026-10-06 | `koa/triage.py` ([기록](koa-triage.md)) | 장애 장면 7개, 원인 징후 상위 (API 서버 전용 lab). 실제 kind-lab 확인 남음 |
 | 3 | 트리아지에 지식 결합 (tier, depends_on, normal, 서명) | 같은 파일 | 구조 설명 있을 때/없을 때 순위 비교 |
 | 4 | 플레이북 + 능력 해석기 | `koa/playbooks.yaml` | 가속기 없을 때 k8s 경로로 대체되는지 |
 | 5 | 스킬 개편 | `cluster-incident-analysis` SKILL.md 를 위 단계로 | 새 채팅에서 장애 분석 1회 |

@@ -60,12 +60,22 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
    dev checkout). If missing or stale, run discovery (`koa-cluster-discovery`). It tells you which tools exist, log index/fields, pipeline
    shape, and known gaps — so you don't re-derive structure from configmaps every time.
 2. **Scope the impact**: what, since when (exact UTC timestamp), which namespaces/nodes. Convert
-   times — fluentd/OpenSearch log in UTC, the user speaks KST.
-3. **Check for a cluster-wide event at that time first**: pod `RESTARTS (Xh ago)` all the same age,
+   times — fluentd/OpenSearch log in UTC, the user speaks KST. Don't stop to ask: default to the last
+   hour and the whole cluster.
+3. **Triage before any single query**: `python3 koa/triage.py [--since 3h] [--at <UTC>] [--ns a,b]`.
+   It sweeps nodes, pods, events, workloads, endpoints and rollouts through the kubernetes MCP in one go
+   (≈3 s) and prints ranked anomalies with onset, evidence and the change right before each, a change
+   timeline, ready-to-run next queries, and what it could not see. Paste its tables to the user right
+   away with your first 2–3 hypotheses (an early read beats a late perfect answer), then verify. Its
+   JSON lives in `<results>/<cluster>.triage/` — reuse it instead of re-listing pods.
+   It folds same-minute restarts on one node into a single "host event" row and demotes pods on
+   NotReady nodes; trust that grouping before chasing each workload. With the MCP, ConfigMap edits
+   show only as creation (no managedFields); `--source kubectl` sees edits.
+4. **Check for a cluster-wide event at that time first**: pod `RESTARTS (Xh ago)` all the same age,
    container `lastState.terminated` with exit 255/`Unknown` at one timestamp, DNS errors
    (`Resolv::ResolvError`, `Name or service not known`) right after → host/cluster restart, not a
    component fault. On kind, a Docker/Mac restart looks exactly like this.
-4. **Walk the pipeline hop by hop**, comparing what each hop should have vs. what arrived.
+5. **Walk the pipeline hop by hop**, comparing what each hop should have vs. what arrived.
    For a log pipeline (app → forwarder → aggregator → OpenSearch):
    - OpenSearch: `max(@timestamp)` + terms agg by `pod` with `max` per pod — which sources stopped.
    - Source: count lines per pod since that timestamp (`kubectl logs --since-time=... | wc -l`).
@@ -74,8 +84,8 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
    - Forwarder/aggregator logs: buffer flush failures, `retry succeeded`, `detached/recovered
      forwarding server`. Recovered + no later errors = pipeline healthy.
    - Only declare "collection stopped" when unfiltered source lines exist that never reached the index.
-5. **Rank 3–5 hypotheses** with the evidence for/against each before concluding.
-6. **Report**: conclusion + confidence, evidence table (source/tool per row), timeline, what could
+6. **Rank 3–5 hypotheses** with the evidence for/against each before concluding.
+7. **Report**: conclusion + confidence, evidence table (source/tool per row), timeline, what could
    not be verified, recommended actions (not executed).
 
 ## Pitfalls
@@ -83,4 +93,7 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
 - "No documents since T" in a log index is ambiguous: traffic-free periods and stalled shippers look
   identical without a heartbeat. Step 4's source-vs-index comparison is the read-only way to tell.
 - `fieldSelector status.phase!=Running` misses CrashLoopBackOff; list all pods and read RESTARTS.
+- mcp-server-kubernetes 4.1.9 `kubectl_get` with `output: json` on a list returns only name/namespace/
+  status/createdAt (it reshapes it). Use `output: yaml` for full objects (triage.py does). Its default
+  output cap is 1 MB (`SPAWN_MAX_BUFFER`); triage raises it for its own process only.
 - Remaining k8s events are not a retention measure — read kube-apiserver `--event-ttl` (default 1h).
