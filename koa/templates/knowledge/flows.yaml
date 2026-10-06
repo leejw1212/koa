@@ -1,0 +1,37 @@
+# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md
+schema: koa.knowledge/v1
+cluster: <클러스터>
+
+# 사람이 부르는 이름 → k8s 워크로드(<ns>/<Kind>/<이름>). aliases 는 질문 속 단어를 찾는 데 쓴다.
+components:
+  rabbitmq:
+    workload: mq/StatefulSet/rabbitmq
+    kind: message-queue
+    aliases: [rmq, 래빗, mq]
+  order-api:
+    workload: shop/Deployment/order-api
+    tier: critical               # critical | normal | batch
+    aliases: [주문 API]
+  order-worker:
+    workload: shop/Deployment/order-worker
+    aliases: [주문 워커, 컨슈머]
+  orders-db:
+    external: true               # 클러스터 밖: 상태는 호출하는 쪽 로그의 문구로 판정
+    aliases: [주문 DB, mysql]
+    log_signatures: ["Communications link failure", "Too many connections"]
+
+# hop 은 순서대로. 문자열 목록(동기 호출 체인) 또는 {from, to, via, role} (role: produce | consume | call)
+flows:
+  http-order:
+    kind: http
+    hops: [ingress-nginx, gateway, order-api, orders-db]
+  order-async:
+    kind: queue
+    hops:
+      - {from: order-api, to: rabbitmq, via: "exchange orders / queue order.created", role: produce}
+      - {from: rabbitmq, to: order-worker, via: "queue order.created", role: consume}
+      - {from: order-worker, to: orders-db, role: call}
+
+# 정상인데 이상해 보이는 것
+normal:
+  - {component: order-worker, note: "매일 02:00 정산 배치 때 큐가 쌓였다 30분 안에 빠진다"}
