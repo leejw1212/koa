@@ -56,6 +56,13 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
 
 ## Procedure
 
+0. **Request from the web UI**: when the user pastes "local/requests/<cluster>/<id>/request.yaml 의 조사 요청을
+   분석해줘", read that file first. It is the investigation plan already built from cluster knowledge
+   (`koa/knowledge.py plan`): target, symptom, `path` (hops in check order), `known` past incidents (check their
+   log signatures first), `normal` patterns. `triage.txt` in the same folder is the triage already run for it
+   (don't re-run unless it failed or is stale). Follow the steps below along that path, then write the final
+   report (cause point, evidence table, what could not be verified) to `report.md` in that folder — the web UI
+   shows it — and give the same summary in chat. Cluster knowledge itself: `local/knowledge/<cluster>/`.
 1. **Read the cluster profile first** (`$HERMES_HOME/local/clusters/<name>.yaml`, or `clusters/` in a
    dev checkout). If missing or stale, run discovery (`koa-cluster-discovery`). It tells you which tools exist, log index/fields, pipeline
    shape, and known gaps — so you don't re-derive structure from configmaps every time.

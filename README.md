@@ -40,6 +40,18 @@ KOA 가 하는 일 (스킬 `koa-cluster-discovery`):
 
 장애 분석은 스킬 `cluster-incident-analysis`.
 
+### 웹 화면 (클러스터 지식 · 조사 요청 · 결과)
+
+YAML 을 직접 쓰지 않고 표와 폼으로 클러스터 지식(구성요소·흐름·과거 이슈)을 넣고, 조사 요청을 남기고, 결과를 본다.
+이 컴퓨터에서만 열린다 (127.0.0.1, 밖으로 여는 옵션 없음).
+
+```bash
+cd ~/.hermes/profiles/koa && python3 koa/web.py     # → http://127.0.0.1:8765
+```
+
+조사 요청을 저장하면 조사 계획과 트리아지가 바로 나오고, KOA 채팅에 붙여 넣을 한 줄이 생긴다. KOA 가 분석을 끝내면
+같은 폴더의 `report.md` 가 결과 화면에 보인다. 자세히: [docs/koa-web.md](docs/koa-web.md)
+
 ## 무엇이 들어 있나
 
 | 경로 | 내용 | 프로필에 주입 방식 |
@@ -47,14 +59,14 @@ KOA 가 하는 일 (스킬 `koa-cluster-discovery`):
 | `SOUL.md` | KOA 정체성과 항상 지키는 규칙 (클러스터 무변경, 읽기 전용, 토큰은 사용자에게) | 모든 대화의 시스템 프롬프트 |
 | `skills/devops/` | `koa-cluster-discovery`, `cluster-incident-analysis`, `hermes-mcp-servers`, `kubernetes-agent-access` | 스킬 목록 → 해당 작업 때 로드 |
 | `config.yaml` | 모델, 터미널 `KUBECONFIG` 기본값. **MCP 는 비어 있음** (클러스터마다 온보딩 때 등록) | 프로필 설정 |
-| `koa/` | `discover.py`, `plan.py`, `query.py`, `readonly.py`, `report.py`, `check_mcp.py`, `mcp_client.py`, `catalog.yaml` (MCP 정의·조회·검증 상태) | 도구 |
+| `koa/` | `discover.py`, `plan.py`, `query.py`, `triage.py`, `knowledge.py`(지식·조사 계획), `web.py`(웹 화면), `readonly.py`, `report.py`, `check_mcp.py`, `mcp_client.py`, `catalog.yaml` (MCP 정의·조회·검증 상태) | 도구 |
 | `k8s/` | 읽기 전용 SA 매니페스트 + kubeconfig 생성 스크립트 | 클러스터 관리자용 |
 | `terminal/agent-env.sh` | 에이전트 터미널의 `KUBECONFIG` 를 읽기 전용 파일로 | `terminal.shell_init_files` |
 | `distribution.yaml` | 배포 매니페스트 (설치 대상 경로, 선택 env 목록) | – |
 | `docs/` | 설계·검증 기록 | 참고 |
 | `lab/`, `clusters/` | kind-lab 개발용 (설치본에는 안 들어감) | – |
 
-설치본에서 사용자 데이터는 업데이트해도 유지된다: `.env`(토큰), `memories/`, `sessions/`, `local/clusters/`(탐색 결과).
+설치본에서 사용자 데이터는 업데이트해도 유지된다: `.env`(토큰), `memories/`, `sessions/`, `local/clusters/`(탐색 결과), `local/knowledge/`(클러스터 지식), `local/requests/`(조사 요청·결과).
 
 ## 업데이트
 
