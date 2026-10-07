@@ -53,14 +53,30 @@ def _norm_workload(m):
 
 
 def _match_workload(name, workloads):
-    """구성요소 이름 → 클러스터 워크로드 (이름이 같거나, 하나뿐인 포함 관계)."""
+    """구성요소 이름 → 클러스터 워크로드 (이름이 같거나, 하나뿐인 포함 관계).
+    'redis-2' 같은 <기본>-<n> 이름이면 기본 이름이 포함된 워크로드들 중 n 번째를 반환한다
+    (같은 종류가 여럿일 때 자유글에서 몇 번째 것인지 지정)."""
     if not workloads:
         return None
     key = name.lower().replace(" ", "-")
-    exact = [w for w in workloads if w.rsplit("/", 1)[-1].lower() == key]
+
+    def wname(w):
+        return w.rsplit("/", 1)[-1].lower()
+
+    # <기본>-N (N=2..) 형태: 기본 포함 워크로드의 N번째
+    m = re.match(r"^(.*?)-(\d{1,3})$", key)
+    if m:
+        base, idx = m.group(1), int(m.group(2))
+        part = [w for w in workloads if base in wname(w)]
+        if idx >= 1 and idx <= len(part):
+            return part[idx - 1]
+        if len(part) >= 1:
+            return None  # 지정한 번호가 범위 밖 → 명시하라고 안내
+
+    exact = [w for w in workloads if wname(w) == key]
     if len(exact) == 1:
         return exact[0]
-    part = [w for w in workloads if key in w.rsplit("/", 1)[-1].lower()]
+    part = [w for w in workloads if key in wname(w)]
     return part[0] if len(part) == 1 else None
 
 
@@ -68,6 +84,15 @@ def extract(text, existing=None, workloads=None):
     """자유 글 → (flows.yaml dict 의 components·flows·normal, 메모 목록).
     existing: 지금 flows.yaml 의 components (워크로드·별명 등 이미 정한 값은 유지)."""
     comps = {k: dict(v or {}) for k, v in (existing or {}).items()}
+    # 사용자가 "redis-2", "rabbitmq-3" 처럼 번호 붙은 이름만 써도,
+    # 이미 아는 종류(redis·rabbitmq…)가 클러스터에 여럿이면 매칭해 구성요소로 미리 넣는다.
+    if workloads:
+        for m in sorted(set(re.findall(r"(?<![0-9a-z_-])[A-Za-z][A-Za-z0-9_]*-[0-9]{1,3}(?![0-9a-z_-])", text or ""))):
+            if m in comps:
+                continue
+            base = re.sub(r"-[0-9]{1,3}$", "", m)
+            if base in comps and _match_workload(m, workloads):
+                comps[m] = {"workload": _match_workload(m, workloads)}
     flows, normal, notes = {}, [], []
     text = re.sub(r"<!--.*?-->", "", text or "", flags=re.S)   # 주석(예시·안내)은 읽지 않는다
     lines = [_clean(l) for l in text.splitlines()]

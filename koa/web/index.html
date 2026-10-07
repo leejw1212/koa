@@ -68,6 +68,10 @@ input, select, textarea { font: inherit; color: var(--ink); width: 100%; backgro
   border: 1px solid var(--edge-soft); border-radius: 14px; padding: 9px 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); padding: 0; }
+.disc-list { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.disc-item { gap: 8px; padding: 3px 0; align-items: flex-start; }
+.disc-item b { font-size: 13px; }
+.disc-item .faint { font-size: 12px; word-break: break-all; }
 textarea { resize: vertical; line-height: 1.7; }
 textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; border-radius: 18px; }
 
@@ -212,6 +216,13 @@ order-worker 는 shop/Deployment/order-worker 이고 컨슈머라고도 불러  
 orders-db 가 죽으면 "Too many connections" 가 찍힌다          따옴표 = 먼저 찾을 로그 문구
 매일 02:00 배치 때 order-worker 큐가 쌓였다 빠진다            정상 패턴 (오탐 줄이기)</pre>
         <p class="faint">워크로드를 안 적으면 클러스터에서 같은 이름의 워크로드를 찾아 붙입니다. 규칙에 안 맞는 글도 그대로 두면 분석 때 참고로 읽습니다.</p>
+      </details>
+      <details style="margin-top:12px" id="discDetails"><summary>discover 에서 구성요소 직접 고르기 <span class="faint" id="discCount"></span></summary>
+        <div id="discCands" class="disc-list"></div>
+        <div class="row" style="margin-top:10px; gap:8px">
+          <button class="btn primary" id="addSel">선택을 구성요소로 추가</button>
+          <span class="faint" id="discSel"></span>
+        </div>
       </details>
     </section>
     <section class="card glass sticky">
@@ -413,7 +424,43 @@ function renderKnowledge() {
   $("#kpath").textContent = k.path; $("#kText").value = k.text; S.dirty = false; $("#saveState").textContent = "";
   $("#understood").innerHTML = understoodHTML(k.understood, [], k.check);
   previewText();
+  loadCands();
 }
+// discover 후보: 체크로 구성요소 직접 추가
+const KIND_LABEL = { "message-queue": "큐", cache: "캐시·Redis", ingress: "Ingress", database: "DB" };
+let DISC = []; // 모든 후보 (워크로드 기준 dedupe)
+async function loadCands() {
+  if (!S.cluster) return;
+  try {
+    const j = await api(kpath() + "/candidates");
+    DISC = j.candidates || [];
+    $("#discCount").textContent = `(${DISC.length})`;
+    const groups = {};
+    DISC.forEach(c => { (groups[c.kind] = groups[c.kind] || []).push(c); });
+    $("#discCands").innerHTML = Object.entries(groups).map(([kind, list]) =>
+      `<div class="sec"><div class="label">${esc(KIND_LABEL[kind] || kind)} · ${list.length}</div>` +
+      list.slice(0, 200).map(c => `<label class="row disc-item"><input type="checkbox" data-wl="${esc(c.workload)}">
+        <span><b>${esc(c.name)}</b> <span class="faint">${esc(c.workload.replace("/StatefulSet/", " / ").replace("/Deployment/", " / ").replace("/DaemonSet/", " / "))}</span></span></label>`).join("") +
+      `</div>`).join("") || '<div class="msg faint">추가할 후보가 없습니다 (discover 프로필의 큐·캐시·DB·Ingress).</div>';
+    refreshDiscSel();
+  } catch (e) { /* 후보 로드 실패는 조용히 */ }
+}
+function refreshDiscSel() {
+  const n = $$("#discCands input:checked").length;
+  $("#discSel").textContent = n ? n + " 개 선택됨" : "";
+}
+$("#discCands").addEventListener("change", refreshDiscSel);
+$("#addSel").onclick = async () => {
+  const wl = $$("#discCands input:checked").map(x => x.dataset.wl);
+  if (!wl.length) return toast("추가할 구성요소를 체크하세요");
+  try {
+    const j = await api(kpath() + "/add_components", { workloads: wl });
+    toast(`추가됨: ${(j.added || []).join(", ") || "이미 있음"}`);
+    S.k = await api(kpath()); renderKnowledge();
+    const warn = (j.check || []).filter(c => c.level === "error").length;
+    if (warn) toast(`${warn}개 확인 필요 — KOA가 이해한 것 보세요`, 4000);
+  } catch (e) { toast(e.message, 4000); }
+};
 const previewText = debounce(async () => {
   if (!S.k) return;
   try { const j = await api(kpath() + "/preview", { text: $("#kText").value }); $("#understood").innerHTML = understoodHTML(j.understood, j.notes, j.check); } catch (e) { /* 미리보기 실패는 조용히 */ }

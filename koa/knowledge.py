@@ -94,6 +94,101 @@ def seed_components(prof):
     return out
 
 
+def discover_candidates(cluster):
+    """discover 프로필에서 구성요소로 추가할 수 있는 후보 (메시지 큐·캐시·ingress·db 인스턴스를 모두).
+    이미 flows.yaml 구성요소에 들어간 워크로드는 제외. 사용자가 체크로 직접 고르는 용도."""
+    prof = profile(cluster)
+    if not prof:
+        return []
+    comps = (prof or {}).get("components") or {}
+    have_wl = set()
+    for c in (load_flows(cluster).get("components") or {}).values():
+        w = (c or {}).get("workload")
+        if w:
+            have_wl.add(str(w))
+    out, seen = [], set()
+    for cname, c in comps.items():
+        c = c or {}
+        if c.get("kind") not in APP_KINDS:
+            continue
+        for inst in (c.get("instances") or []):
+            ns = inst.get("namespace")
+            w = inst.get("workload") or ""
+            if not ns or "/" not in w or w.count("/") != 1:
+                continue
+            wl_full = "%s/%s" % (ns, w)
+            if wl_full in have_wl or wl_full in seen:
+                continue
+            seen.add(wl_full)
+            base = w.rsplit("/", 1)[-1]
+            # 구성요소 이름: 워크로드 마지막 이름에서 유형 접두 제거한 간결한 이름, 중복 시 번호
+            n = base
+            if not n or n.lower() in {"deployment", "statefulset", "daemonset"}:
+                n = cname
+            out.append({"name": n, "workload": wl_full, "kind": c["kind"], "namespace": ns,
+                        "cname": cname, "count": len((c.get("instances") or []))})
+    # 이름 중복이면 번호를 붙여 유일하게
+    seen_names = {}
+    for o in out:
+        nm = o["name"]
+        seen_names[nm] = seen_names.get(nm, 0) + 1
+    cr = {}
+    for o in out:
+        nm = o["name"]
+        if seen_names[nm] > 1:
+            k = seen_names[nm]
+            unique = "%s-%d" % (nm, k)
+            while unique in seen_names:
+                k += 1
+                unique = "%s-%d" % (nm, k)
+            seen_names[nm] += 1
+            o["name"] = unique
+        c = o["cname"]
+        cr["%s|%s" % (c, o["workload"])] = o
+    return sorted(cr.values(), key=lambda x: (x["kind"], x["namespace"], x["name"]))
+
+
+def add_discovered_components(cluster, workloads):
+    """선택한 클러스터 워크로드(성분)를 flows.yaml components 에 추가.
+    workloads: ('namespace/Kind/name' 문자열 목록). 이미 있으면 그대로 둔다.
+    반환: (추가한 이름 목록, 흐름 check 결과)."""
+    d = cluster_dir(cluster)
+    f = d / "flows.yaml"
+    data = load_flows(cluster)
+    comps = data.setdefault("components", {})
+    have_wl = {str(c.get("workload")) for c in comps.values() if c.get("workload")}
+    kind_of = {}
+    prof = profile(cluster) or {}
+    for cname, c in (prof.get("components") or {}).items():
+        for inst in (c or {}).get("instances") or []:
+            ns = inst.get("namespace")
+            w = inst.get("workload") or ""
+            if ns and w and w.count("/") == 1:
+                kind_of["%s/%s" % (ns, w)] = (c or {}).get("kind") or cname
+    added = []
+    for wl in workloads:
+        wl = str(wl).strip()
+        if not wl or wl in have_wl:
+            continue
+        # 구성요소 이름: 워크로드 마지막 이름에서 유형 접두 제거, 중복 시 번호
+        base = wl.rsplit("/", 1)[-1]
+        name = base
+        exists = set(comps)
+        if name in exists:
+            i = 2
+            while "%s-%d" % (name, i) in exists:
+                i += 1
+            name = "%s-%d" % (name, i)
+        comps[name] = {"workload": wl, "kind": kind_of.get(wl) or "cache"}
+        have_wl.add(wl)
+        added.append(name)
+    if added:
+        with open(f, "w") as fh:
+            fh.write("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
+                     + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
+    return added, check(cluster, data)
+
+
 def init(cluster, example=False):
     """지식 폴더를 만든다. 기본은 빈 구조 + 클러스터 프로필에서 찾은 큐·캐시·ingress.
     example=True 면 템플릿 예시(order-api 등)를 그대로 — 연습용. 실제 클러스터에 쓰면 예시가 분석 경로에 섞인다."""

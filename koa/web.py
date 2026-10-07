@@ -370,6 +370,11 @@ class Handler(BaseHTTPRequestHandler):
                 c = p[1]
                 if method == "GET" and len(p) == 2:
                     return self._send(200, get_knowledge(c))
+                if method == "GET" and p[2:] == ["candidates"]:
+                    return self._send(200, {"candidates": K.discover_candidates(c)})
+                if method == "POST" and p[2:] == ["add_components"]:
+                    added, check = K.add_discovered_components(c, body.get("workloads") or [])
+                    return self._send(200, {"added": added, "check": [{"level": lv, "msg": m} for lv, m in check]})
                 if method == "POST" and p[2:] == ["preview"]:
                     return self._send(200, preview_text(c, body))
                 if method == "POST" and p[2:] == ["text"]:
