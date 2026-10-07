@@ -115,9 +115,11 @@ textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; bord
 .node.unk { border-color: var(--warn); }
 .arrow { color: var(--faint); font-size: 13px; padding: 0 4px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; }
 .arrow small { font-size: 10.5px; color: var(--accent); font-weight: 700; }
-.comp { padding: 10px 12px; border-radius: 14px; background: var(--glass-soft); border: 1px solid var(--edge-soft); min-width: 0; }
+.comp { padding: 10px 12px; border-radius: 14px; background: var(--glass-soft); border: 1px solid var(--edge-soft); min-width: 0; position: relative; }
 .comp b { font-size: 13.5px; }
 .comp .wl { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; }
+.comp .rm { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; line-height: 1; border-radius: 6px; border: none; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; opacity: .5; display: flex; align-items: center; justify-content: center; }
+.comp .rm:hover { opacity: 1; background: var(--danger-soft, rgba(229,57,53,.12)); color: #e53935; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 .sec { margin-top: 18px; }
 .label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; margin-bottom: 6px; }
@@ -407,12 +409,12 @@ function understoodHTML(u, notes, check) {
   }).join("") : '<p class="faint">아직 없습니다. <code>a → b → c</code> 처럼 한 줄 적어 보세요.</p>';
   h += "</div>";
   const names = Object.keys(comps);
-  h += `<div class="sec"><div class="label">구성요소 ${names.length}</div><div class="grid">` + names.map(n => {
+  h += `<div class="sec"><div class="label">구성요소 ${names.length} <span class="faint">(× 는 제외 → discover로)</span></div><div class="grid">` + names.map(n => {
     const c = comps[n];
     const where = c.external ? '<span class="chip">클러스터 밖</span>' : c.workload ? `<div class="wl">${esc(c.workload)}</div>` : '<span class="chip warn">워크로드 모름</span>';
     const al = (c.aliases || []).map(a => `<span class="chip">${esc(a)}</span>`).join("");
     const sg = (c.log_signatures || []).map(a => `<span class="chip warn">"${esc(a)}"</span>`).join("");
-    return `<div class="comp"><b>${esc(n)}</b> ${c.kind === "message-queue" ? '<span class="chip accent">큐</span>' : ""}<div style="margin-top:4px">${where}</div>${al || sg ? `<div class="chips" style="margin-top:6px">${al}${sg}</div>` : ""}</div>`;
+    return `<div class="comp"><button class="rm" data-name="${esc(n)}" title="이 구성요소를 제외하고 discover로 되돌리기">×</button><b>${esc(n)}</b> ${c.kind === "message-queue" ? '<span class="chip accent">큐</span>' : ""}<div style="margin-top:4px">${where}</div>${al || sg ? `<div class="chips" style="margin-top:6px">${al}${sg}</div>` : ""}</div>`;
   }).join("") + "</div></div>";
   if ((u.normal || []).length) h += `<div class="sec"><div class="label">정상 패턴</div>` + u.normal.map(x => `<div class="msg">· <b>${esc(x.component)}</b> ${esc(x.note)}</div>`).join("") + "</div>";
   const msgs = (notes || []).map(m => `<div class="msg warn">${esc(m)}</div>`).concat((check || []).map(c => `<div class="msg ${c.level === "error" ? "err" : "warn"}">${esc(c.msg)}</div>`));
@@ -426,6 +428,19 @@ function renderKnowledge() {
   previewText();
   loadCands();
 }
+// 구성요소 제외(×) → flows.yaml에서 빼고 discover 후보로 되돌린다
+$("#understood").addEventListener("click", async e => {
+  const btn = e.target.closest(".rm");
+  if (!btn) return;
+  const name = btn.dataset.name;
+  if (!confirm(`'${name}' 를 구성요소에서 제외할까요?`)) return;
+  try {
+    const j = await api(kpath() + "/delete_components", { names: [name] });
+    toast(`제외됨: ${(j.removed || []).join(", ") || "이미 없음"} → discover 후보로 이동`);
+    S.k = await api(kpath()); renderKnowledge();  // loadCands() 도 다시 불려 후보에 다시 보임
+    previewPlan();
+  } catch (e) { toast(e.message, 4000); }
+});
 // discover 후보: 체크로 구성요소 직접 추가
 const KIND_LABEL = { "message-queue": "큐", cache: "캐시·Redis", ingress: "Ingress", database: "DB" };
 let DISC = []; // 모든 후보 (워크로드 기준 dedupe)

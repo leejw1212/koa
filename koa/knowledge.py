@@ -189,6 +189,26 @@ def add_discovered_components(cluster, workloads):
     return added, check(cluster, data)
 
 
+def delete_discovered_components(cluster, names):
+    """등록된 구성요소(들)를 flows.yaml 에서 제거한다. 제거하면 discover 후보로 되돌아간다.
+    names: 구성요소 이름 목록. 없거나 이미 없으면 그대로.
+    반환: (제거한 이름 목록, 남은 구성요소 dict)."""
+    d = cluster_dir(cluster)
+    f = d / "flows.yaml"
+    if not f.is_file():
+        return [], {}
+    data = load_flows(cluster)
+    comps = data.get("components") or {}
+    removed = [n for n in names if n in comps]
+    for n in removed:
+        del comps[n]
+    if removed:
+        with open(f, "w") as fh:
+            fh.write("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
+                     + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
+    return removed, comps
+
+
 def init(cluster, example=False):
     """지식 폴더를 만든다. 기본은 빈 구조 + 클러스터 프로필에서 찾은 큐·캐시·ingress.
     example=True 면 템플릿 예시(order-api 등)를 그대로 — 연습용. 실제 클러스터에 쓰면 예시가 분석 경로에 섞인다."""

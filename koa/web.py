@@ -375,6 +375,9 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "POST" and p[2:] == ["add_components"]:
                     added, check = K.add_discovered_components(c, body.get("workloads") or [])
                     return self._send(200, {"added": added, "check": [{"level": lv, "msg": m} for lv, m in check]})
+                if method == "POST" and p[2:] == ["delete_components"]:
+                    removed, comps = K.delete_discovered_components(c, body.get("names") or [])
+                    return self._send(200, {"removed": removed, "components": list(comps)})
                 if method == "POST" and p[2:] == ["preview"]:
                     return self._send(200, preview_text(c, body))
                 if method == "POST" and p[2:] == ["text"]:
