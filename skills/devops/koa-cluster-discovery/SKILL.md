@@ -80,6 +80,20 @@ equivalent; use query.py from the terminal, in scripts, or before the app has be
 Advice text lives in `koa/catalog.yaml` (`gap_advice`, component `fallback`). Improve it there,
 not in ad-hoc chat text.
 
+## 클러스터 지식 흐름 → 구성요소 매칭 (flow_nodes)
+
+흐름(flow) 경로의 노드와 구성요소(component)는 정확 일치만 되던 걸, 부분 매칭으로 개선했다(커밋 8b2d65c).
+- 매칭 대상은 구성요소 이름 + `aliases`(질문 매칭용) + `flow_nodes`(흐름 매칭 전용).
+  노드가 그 이름과 같거나 한쪽이 다른 쪽을 부분 문자열로 포함하면 매칭(node_to_comps).
+- 여러 구성요소가 같은 흐름 이름을 공유할 수 있다. 예: 흐름 노드 `OpenAPI G/W or Console Wrapper`
+  ↔ admin/manager/user-console-wrapper 둘 다 `flow_nodes: [Console Wrapper]` 로 매칭.
+- `aliases` 는 질문에서 대상을 찾는 데 쓰므로 공통 이름을 넣으면 '질문에서 대상을 못 가린다' warn이 난다.
+  공통 이름은 `flow_nodes` 에, 고유한 부르는 말은 `aliases` 에 넣는다.
+- 질문이 여러 구성요소와 매칭되면(동점) plan 은 target 을 고정하지 않고 `candidates` 를 내보낸다.
+  웹 UI 조사 요청에서 '대상을 직접 선택' 칩을 보여주고, 선택 시 확인 순서가 그 대상 기준으로 재구성된다.
+  API: `POST /api/plan` body 에 `target` 을 넣으면(force_target) 그대로 고정.
+- 구성요소 편집 폼에 '흐름 매칭 이름' 필드가 있어 flow_nodes 를 쉼표 구분으로 입력/저장한다(save_shards 가 보존).
+
 ## Promoting candidate → verified (catalog maintenance, dev checkout)
 
 1. Get read-only creds. Real clusters: from the user. kind-lab: `python3 lab/kind-lab-tokens.py`
