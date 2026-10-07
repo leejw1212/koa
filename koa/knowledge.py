@@ -61,13 +61,18 @@ def discovered():
 
 
 def profile(cluster):
-    f = CLUSTERS / ("%s.yaml" % cluster)
-    if not f.is_file():
-        return None
-    try:
-        return yaml.safe_load(f.read_text()) or {}
-    except yaml.YAMLError:
-        return None
+    # discover 프로필은 컨텍스트 이름(dev2-admin@dev2-kr-west1)으로 저장될 수 있다 → 클러스터명으로도 찾는다
+    cands = [CLUSTERS / ("%s.yaml" % cluster)]
+    if CLUSTERS.is_dir():
+        cands += sorted(CLUSTERS.glob("*@%s.yaml" % cluster))
+    for f in cands:
+        if not f.is_file():
+            continue
+        try:
+            return yaml.safe_load(f.read_text()) or {}
+        except yaml.YAMLError:
+            return None
+    return None
 
 
 def seed_components(prof):

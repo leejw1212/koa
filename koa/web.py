@@ -175,12 +175,23 @@ def kubeconfig_context():
     return re.sub(r"-readonly$", "", ctx) or None
 
 
+def cluster_name(n):
+    """후보 이름 → 지식 폴더로 쓸 클러스터명. 'user@cluster' 컨텍스트/탐색 프로필(dev2-admin@dev2-kr-west1)은
+    @ 뒤 부분을 쓴다 (클러스터 이름엔 @ 가 없다). 안 맞으면 원래 이름 반환."""
+    if n:
+        n = n.strip()
+        if "@" in n:
+            n = n.rsplit("@", 1)[1]
+    return n or None
+
+
 def cluster_info():
     have = K.clusters()
     cands = []
     for n in K.discovered() + [kubeconfig_context()]:
-        if n and K.NAME_RE.match(n) and n not in have and n not in cands:
-            cands.append(n)
+        cname = cluster_name(n)
+        if cname and K.NAME_RE.match(cname) and cname not in have and cname not in cands:
+            cands.append(cname)
     return {"clusters": have, "candidates": cands, "context": kubeconfig_context()}
 
 
