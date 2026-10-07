@@ -49,6 +49,19 @@ rules:
   - apiGroups: [metrics.k8s.io]
     resources: [nodes, pods]
     verbs: [get, list]
+  # Gateway API 라우팅 계층 조회 (HTTPRoute 로 라우팅하는 클러스터용). discover 가
+  # httproutes.gateway.networking.k8s.io 를 --all-namespaces 로 list 한다. 조회만 허용.
+  - apiGroups: [gateway.networking.k8s.io]
+    resources:
+      - gateways
+      - gatewayclasses
+      - httproutes
+      - grpcroutes
+      - tcproutes
+      - udproutes
+      - tlsroutes
+      - referencegrants
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
