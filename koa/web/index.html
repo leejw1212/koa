@@ -85,7 +85,7 @@ textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; bord
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
-.split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 18px; align-items: start; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } .sticky { position: static !important; } }
 @media (max-width: 700px) { .bar { border-radius: 22px; } .top { position: static; } }
 .sticky { position: sticky; top: 92px; }
@@ -201,35 +201,38 @@ details[open] > summary::before { transform: rotate(90deg); }
 </div>
 
 <div id="tab-knowledge" hidden>
-  <div class="split">
-    <section class="card glass">
-      <div class="row" style="margin-bottom:8px">
-        <h2 class="grow">클러스터 설명</h2>
-        <span class="faint" id="saveState"></span>
-        <button class="btn primary" id="saveText">저장</button>
-      </div>
-      <p class="hint">말하듯 자유롭게 쓰세요. 화살표(<code>→</code>)로 적은 줄은 분석 경로가 되고, 오른쪽에 KOA 가 이해한 것이 바로 보입니다. <span class="faint">⌘/Ctrl + S 로 저장</span></p>
-      <textarea id="kText" class="editor" spellcheck="false"></textarea>
-      <details style="margin-top:12px"><summary>이렇게 쓰면 알아들어요</summary>
-        <pre style="margin-top:8px">사용자 → ingress-nginx → gateway → order-api → orders-db      요청이 지나는 길
+  <section class="card glass" style="margin-bottom:12px">
+    <div class="row" style="margin-bottom:8px">
+      <h2 class="grow">클러스터 설명</h2>
+      <span class="faint" id="saveState"></span>
+      <button class="btn primary" id="saveText">저장</button>
+    </div>
+    <p class="hint">말하듯 자유롭게 쓰세요. 화살표(<code>→</code>)로 적은 줄은 분석 경로가 되고, 아래에 KOA 가 이해한 것이 바로 보입니다. <span class="faint">⌘/Ctrl + S 로 저장</span></p>
+    <textarea id="kText" class="editor" spellcheck="false"></textarea>
+    <details style="margin-top:12px"><summary>이렇게 쓰면 알아들어요</summary>
+      <pre style="margin-top:8px">사용자 → ingress-nginx → gateway → order-api → orders-db      요청이 지나는 길
 order-api → rabbitmq(rmq, 래빗) → order-worker               큐를 지나면 넣기·꺼내기, 괄호 안은 별명
 orders-db: 주문 DB, mysql, 클러스터 밖                        콜론 뒤는 별명, '밖/외부' 는 클러스터 밖
 order-worker 는 shop/Deployment/order-worker 이고 컨슈머라고도 불러   워크로드·별명
 orders-db 가 죽으면 "Too many connections" 가 찍힌다          따옴표 = 먼저 찾을 로그 문구
 매일 02:00 배치 때 order-worker 큐가 쌓였다 빠진다            정상 패턴 (오탐 줄이기)</pre>
-        <p class="faint">워크로드를 안 적으면 클러스터에서 같은 이름의 워크로드를 찾아 붙입니다. 규칙에 안 맞는 글도 그대로 두면 분석 때 참고로 읽습니다.</p>
-      </details>
-      <details style="margin-top:12px" id="discDetails"><summary>discover 에서 구성요소 직접 고르기 <span class="faint" id="discCount"></span></summary>
+      <p class="faint">워크로드를 안 적으면 클러스터에서 같은 이름의 워크로드를 찾아 붙입니다. 규칙에 안 맞는 글도 그대로 두면 분석 때 참고로 읽습니다.</p>
+    </details>
+  </section>
+  <div class="split">
+    <section class="card glass sticky">
+      <div class="row"><h2 class="grow">KOA 가 이해한 것</h2><span class="faint" id="kpath"></span></div>
+      <div id="understood"></div>
+    </section>
+    <section class="card glass">
+      <details open id="discDetails"><summary>discover 에서 구성요소 직접 고르기 <span class="faint" id="discCount"></span></summary>
+        <p class="hint" style="margin:4px 0 8px">클러스터에서 발견한 큐·캐시·DB ·Ingress 인스턴스 중 원하는 것을 체크해 구성요소로 추가하세요. 구성요소의 ×(제외)는 다시 여기로 되돌립니다.</p>
         <div id="discCands" class="disc-list"></div>
         <div class="row" style="margin-top:10px; gap:8px">
           <button class="btn primary" id="addSel">선택을 구성요소로 추가</button>
           <span class="faint" id="discSel"></span>
         </div>
       </details>
-    </section>
-    <section class="card glass sticky">
-      <div class="row"><h2 class="grow">KOA 가 이해한 것</h2><span class="faint" id="kpath"></span></div>
-      <div id="understood"></div>
     </section>
   </div>
 </div>
