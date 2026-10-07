@@ -37,6 +37,7 @@ READ_CHECKS = [
     ("list", "nodes", False),
     ("list", "services", True),
     ("list", "ingresses.networking.k8s.io", True),
+    ("list", "httproutes.gateway.networking.k8s.io", True),
     ("list", "deployments.apps", True),
     ("list", "configmaps", True),
     ("get", "nodes.metrics.k8s.io", False),
@@ -198,6 +199,10 @@ def discover(kube, catalog, do_probe):
         ingresses = kube.json("get", "ingresses.networking.k8s.io", "--all-namespaces")["items"]
     except RuntimeError:
         ingresses = []
+    try:
+        httproutes = kube.json("get", "httproutes.gateway.networking.k8s.io", "--all-namespaces")["items"]
+    except RuntimeError:
+        httproutes = []
 
     comp_rules = catalog["components"]
     compiled = {name: re.compile(r["image"]) for name, r in comp_rules.items() if r.get("image")}
@@ -233,6 +238,8 @@ def discover(kube, catalog, do_probe):
                 svc_owner[(ns, sname)] = key
 
     # Ingress: 클러스터 밖에서 들어오는 주소
+    route_backends = set()  # (ns, svc) — 라우팅(Ingress/HTTPRoute)이 가리키는 백엔드 Service
+    route_hosts = {}  # (ns, svc) -> [https://host/경로, ...] — 백엔드 워크로드에 붙일 외부 주소
     for ing in ingresses:
         ns = ing["metadata"]["namespace"]
         tls_hosts = {h for t in ing["spec"].get("tls", []) or [] for h in t.get("hosts", [])}
@@ -244,19 +251,93 @@ def discover(kube, catalog, do_probe):
             scheme = "https" if host in tls_hosts else "http"
             for p in (rule.get("http") or {}).get("paths", []):
                 svc = (p.get("backend", {}).get("service") or {}).get("name")
+                if svc:
+                    route_backends.add((ns, svc))
+                    route_hosts.setdefault((ns, svc), []).append("%s://%s%s" % (scheme, host, clean_path(p.get("path"))))
                 key = svc_owner.get((ns, svc))
                 if key:
                     instances[key]["access"].append("%s://%s%s" % (scheme, host, clean_path(p.get("path"))))
 
+    # Gateway API HTTPRoute: 클러스터 밖에서 들어오는 주소 (ingress 대신 gateway/httproute 를 쓰는 클러스터)
+    for hr in httproutes:
+        ns = hr["metadata"]["namespace"]
+        for host in hr["spec"].get("hostnames", []) or []:
+            for rule in hr["spec"].get("rules", []) or []:
+                path = ""
+                ms = rule.get("matches") or []
+                if ms and (ms[0].get("path") or {}).get("value"):
+                    path = clean_path(ms[0]["path"]["value"])
+                for br in rule.get("backendRefs", []) or []:
+                    if br.get("group", "core") not in ("", "core"):
+                        continue  # Service 가 아닌 백엔드(예: 다른 HTTPRoute)는 접근 주소 근거로 삼지 않는다
+                    svc = br.get("name")
+                    if not svc:
+                        continue
+                    route_backends.add((ns, svc))
+                    route_hosts.setdefault((ns, svc), []).append("https://%s%s" % (host, path))
+                    key = svc_owner.get((ns, svc))
+                    if key:
+                        instances[key]["access"].append("https://%s%s" % (host, path))
+
+    # 라우팅(Ingress/HTTPRoute)이 가리키는 백엔드 Service 뒤의 애플리케이션 워크로드.
+    # 카탈로그 이미지 규칙(redis 등 인프라)에 안 잡힌 Service = 외부로 열린 백엔드 앱 파드다.
+    if catalog["components"].get("app-workload"):
+        svc_selector = {}
+        for s in services:
+            sel = s["spec"].get("selector") or {}
+            if sel:
+                svc_selector[(s["metadata"]["namespace"], s["metadata"]["name"])] = sel
+        owned_wl = {(ns, wl) for (comp, ns, wl) in instances}
+        app_inst = {}  # (ns, wl) -> inst  (wl = 'Kind/name', comp='app-workload')
+        for (ns, svc) in sorted(route_backends):
+            if (ns, svc) in svc_owner:
+                continue  # 이미 카탈로그 인프라 컴포넌트로 잡힘
+            sel = svc_selector.get((ns, svc))
+            if not sel:
+                continue
+            for pod in pods:
+                if pod["metadata"]["namespace"] != ns or not selector_matches(sel, pod["metadata"].get("labels", {})):
+                    continue
+                kind, wl = owner_of(pod)
+                if (ns, wl) in owned_wl:
+                    continue
+                key = (ns, wl)
+                inst = app_inst.setdefault(key, {
+                    "namespace": ns, "workload": "%s/%s" % (kind, wl), "image": None,
+                    "pods": 0, "ready": 0, "services": [], "access": list(route_hosts.get((ns, svc), [])),
+                })
+                inst["pods"] += 1
+                ready = any(cs.get("ready") for cs in pod.get("status", {}).get("containerStatuses", []))
+                inst["ready"] += 1 if ready else 0
+        for (ns, wl), inst in app_inst.items():
+            inst["access"] = sorted(set(inst["access"])) or None
+            instances[("app-workload", ns, wl)] = inst
+
+    # Gateway API HTTPRoute 자체를 라우팅 계층으로 노출 (네임스페이스/이름/hostname + 백엔드 개수)
+    if catalog["components"].get("gateway-httproute"):
+        for hr in httproutes:
+            ns = hr["metadata"]["namespace"]
+            hname = hr["metadata"]["name"]
+            hosts = hr["spec"].get("hostnames", []) or []
+            nb = sum(len(r.get("backendRefs", []) or []) for r in hr["spec"].get("rules", []) or [])
+            inst = {
+                "namespace": ns, "workload": "HTTPRoute/%s" % hname, "image": None,
+                "pods": 0, "ready": 0, "services": [], "access": sorted(set("https://%s" % h for h in hosts)) or None,
+                "hostnames": hosts, "backend_refs": nb,
+            }
+            instances[("gateway-httproute", ns, hname)] = inst
+
     components = {}
     for (comp, ns, wl), inst in sorted(instances.items()):
-        inst.pop("_labels")
-        inst["detected_by"] = "image"
-        if not inst["services"]:
-            inst.pop("services")
-        if inst["access"] and do_probe and comp_rules[comp].get("probe"):
+        inst.pop("_labels", None)
+        inst["detected_by"] = "routing" if comp in ("app-workload", "gateway-httproute") else "image"
+        if not inst.get("image"):
+            inst.pop("image", None)  # 라우팅 감지 구성요소는 이미지 규칙이 없어 image 를 표시하지 않는다
+        if not inst.get("services"):
+            inst.pop("services", None)
+        if inst.get("access") and do_probe and comp_rules[comp].get("probe"):
             inst["probe"] = [probe(u.rstrip("/") + comp_rules[comp]["probe"]) for u in inst["access"]]
-        if not inst["access"]:
+        if not inst.get("access"):
             inst["access"] = None  # 클러스터 밖 접근 주소 없음
         c = components.setdefault(comp, {"kind": comp_rules[comp]["kind"], "instances": []})
         c["instances"].append(inst)

@@ -452,7 +452,7 @@ function flowsToNodes(flows) {
     return { name, kind: f.kind || (uniq.some(n => /rabbit|rmq|kafka|queue|큐/i.test(n)) ? "queue" : "http"), nodes: uniq };
   });
 }
-const KIND_OPT = { "message-queue": "큐", cache: "캐시·Redis", database: "DB", ingress: "Ingress", "": "— (알아서)" };
+const KIND_OPT = { "message-queue": "큐", cache: "캐시·Redis", database: "DB", ingress: "Ingress", gateway: "게이트웨이", app: "앱", "": "— (알아서)" };
 function compSummary(c) {
   return c.external ? "클러스터 밖" : (c.workload || "워크로드 미지정") + ((c.kind && KIND_OPT[c.kind]) ? " · " + KIND_OPT[c.kind] : "");
 }
@@ -593,7 +593,7 @@ $("#understood").addEventListener("click", async e => {
   } catch (e) { toast(e.message, 4000); }
 });
 // discover 후보: 체크로 구성요소 직접 추가
-const KIND_LABEL = { "message-queue": "큐", cache: "캐시·Redis", ingress: "Ingress", database: "DB" };
+const KIND_LABEL = { "message-queue": "큐", cache: "캐시·Redis", ingress: "Ingress", gateway: "게이트웨이", database: "DB", app: "앱" };
 let DISC = []; // 모든 후보 (워크로드 기준 dedupe)
 async function loadCands() {
   if (!S.cluster) return;

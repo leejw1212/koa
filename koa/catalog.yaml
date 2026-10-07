@@ -141,6 +141,13 @@ components:
     kind: ingress
     fallback: 접근 로그가 로그 저장소에 있으면 경로별 status·request_time 을 집계한다. 없으면 컨트롤러 파드 로그(kubectl_logs)
     image: 'ingress-nginx/controller'
+  gateway-httproute:
+    kind: gateway
+    fallback: Gateway API 로 라우팅하면 ingress 가 아니라 gateway.networking.k8s.io 의 HTTPRoute 로 들어온다. 조회 권한이 없으면 관측 불가로 보고한다
+  app-workload:
+    kind: app
+    note: 라우팅(Ingress/HTTPRoute)이 가리키는 백엔드 애플리케이션 파드. 카탈로그 이미지 규칙(redis 등 인프라)과 달리, 외부에서 접근되는 Service 뒤의 워크로드를 감지한다
+    fallback: 앱 파드 로그(kubectl_logs)로 본다. 외부 접근 주소는 라우팅 hostname 으로 추적
   metrics-server:
     kind: metrics-api
     image: 'metrics-server$'

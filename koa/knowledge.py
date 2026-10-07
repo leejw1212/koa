@@ -50,7 +50,7 @@ def clusters():
 
 
 # 탐색(discover.py)에서 찾은 구성요소 중 앱 흐름에 들어가는 종류 → 지식 구성요소로 미리 채운다
-APP_KINDS = ("message-queue", "cache", "ingress", "database")
+APP_KINDS = ("message-queue", "cache", "ingress", "gateway", "database", "app")
 
 
 def discovered():
