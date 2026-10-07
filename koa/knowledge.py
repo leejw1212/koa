@@ -2,7 +2,7 @@
 """KOA 클러스터 지식 — 읽기·검사·조사 계획. 설계: docs/koa-analysis-inputs.md
 
   python3 koa/knowledge.py list                               # 지식이 있는 클러스터
-  python3 koa/knowledge.py init <클러스터>                    # 템플릿을 local/knowledge/<클러스터>/ 로 복사
+  python3 koa/knowledge.py init <클러스터> [--example]        # local/knowledge/<클러스터>/ 만들기 (탐색한 큐·캐시·ingress 를 미리 채움)
   python3 koa/knowledge.py check <클러스터>                   # flows.yaml 의 빈 곳·틀린 곳
   python3 koa/knowledge.py plan <클러스터> "rmq 소비가 안 돼"   # 질문 → 조사 계획 (yaml)
 
@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from paths import KNOWLEDGE, KNOWLEDGE_TEMPLATE  # noqa: E402
+from paths import CLUSTERS, KNOWLEDGE, KNOWLEDGE_TEMPLATE  # noqa: E402
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 ROLES = ("produce", "consume", "call")
@@ -49,16 +49,93 @@ def clusters():
     return sorted(p.name for p in KNOWLEDGE.iterdir() if p.is_dir() and NAME_RE.match(p.name))
 
 
-def init(cluster):
+# 탐색(discover.py)에서 찾은 구성요소 중 앱 흐름에 들어가는 종류 → 지식 구성요소로 미리 채운다
+APP_KINDS = ("message-queue", "cache", "ingress", "database")
+
+
+def discovered():
+    """discover.py 가 만든 클러스터 프로필 이름 (<결과>/<이름>.yaml)."""
+    if not CLUSTERS.is_dir():
+        return []
+    return sorted(p.stem for p in CLUSTERS.glob("*.yaml") if NAME_RE.match(p.stem) and not p.stem.endswith(".mcp"))
+
+
+def profile(cluster):
+    f = CLUSTERS / ("%s.yaml" % cluster)
+    if not f.is_file():
+        return None
+    try:
+        return yaml.safe_load(f.read_text()) or {}
+    except yaml.YAMLError:
+        return None
+
+
+def seed_components(prof):
+    """클러스터 프로필의 메시지 큐·캐시·ingress 를 구성요소로."""
+    comps = (prof or {}).get("components") or {}
+    # 관측·GitOps 도구가 사는 네임스페이스의 것(예: argocd-redis)은 앱 흐름이 아니다
+    infra_ns = {i.get("namespace") for c in comps.values() if (c or {}).get("kind") not in APP_KINDS
+                for i in ((c or {}).get("instances") or [])}
+    out = {}
+    for name, c in comps.items():
+        c = c or {}
+        if c.get("kind") not in APP_KINDS:
+            continue
+        insts = [i for i in (c.get("instances") or [])
+                 if i.get("namespace") and "/" in (i.get("workload") or "") and i["namespace"] not in infra_ns]
+        for n, inst in enumerate(insts):
+            key = name if n == 0 else "%s-%d" % (name, n + 1)
+            out[key] = {"workload": "%s/%s" % (inst["namespace"], inst["workload"]), "kind": c["kind"]}
+    return out
+
+
+def init(cluster, example=False):
+    """지식 폴더를 만든다. 기본은 빈 구조 + 클러스터 프로필에서 찾은 큐·캐시·ingress.
+    example=True 면 템플릿 예시(order-api 등)를 그대로 — 연습용. 실제 클러스터에 쓰면 예시가 분석 경로에 섞인다."""
     d = cluster_dir(cluster)
     if d.exists():
         raise ValueError("이미 있다: %s" % d)
     shutil.copytree(str(KNOWLEDGE_TEMPLATE), str(d), ignore=shutil.ignore_patterns("README.md"))
     f = d / "flows.yaml"
-    f.write_text(f.read_text().replace("cluster: <클러스터>", "cluster: %s" % cluster))
+    if example:
+        f.write_text(f.read_text().replace("cluster: <클러스터>", "cluster: %s" % cluster))
+    else:
+        for x in (d / "incidents").glob("*.md"):
+            x.unlink()
+        data = {"schema": "koa.knowledge/v1", "cluster": cluster,
+                "components": seed_components(profile(cluster)), "flows": {}, "normal": []}
+        f.write_text("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
+                     "# 예시: koa/templates/knowledge/flows.yaml\n"
+                     + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
     a = d / "architecture.md"
-    a.write_text(a.read_text().replace("<클러스터>", cluster, 1))
+    if example:
+        a.write_text(a.read_text().replace("<클러스터>", cluster, 1))
+    else:
+        a.write_text(STARTER % (cluster, ", ".join(data["components"]) or "(없음)"))
     return d
+
+
+STARTER = """# %s
+
+<!--
+자유롭게 쓰세요. KOA 는 아래 같은 줄을 알아듣고 분석 경로로 씁니다. (이 안내는 읽지 않습니다)
+  사용자 → ingress-nginx → gateway → order-api → orders-db      화살표 줄 = 요청이 지나는 길
+  order-api → rabbitmq(rmq, 래빗) → order-worker               큐를 지나면 넣기/꺼내기로 이해, 괄호 안은 별명
+  orders-db 는 클러스터 밖 RDS. 문제가 나면 "Too many connections" 가 찍힌다   따옴표 = 먼저 찾을 로그 문구
+  매일 02:00 배치 때 order-worker 큐가 쌓였다 빠진다             정상 패턴 (오탐 줄이기)
+-->
+
+탐색에서 찾은 것: %s
+
+## 서비스 구조
+
+
+## 요청 흐름
+
+
+## 운영하면서 알게 된 것
+
+"""
 
 
 def load_flows(cluster):
@@ -332,8 +409,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("list")
-    for c in ("init", "check"):
-        sub.add_parser(c).add_argument("cluster")
+    ip = sub.add_parser("init")
+    ip.add_argument("cluster")
+    ip.add_argument("--example", action="store_true", help="템플릿 예시를 채워서 (연습용)")
+    sub.add_parser("check").add_argument("cluster")
     pp = sub.add_parser("plan")
     pp.add_argument("cluster")
     pp.add_argument("question")
@@ -344,7 +423,7 @@ def main():
         if a.cmd == "list":
             print("\n".join(clusters()) or "(없음) — init <클러스터> 로 만든다")
         elif a.cmd == "init":
-            print("만들었다: %s" % init(a.cluster))
+            print("만들었다: %s" % init(a.cluster, a.example))
         elif a.cmd == "check":
             probs = check(a.cluster)
             for lv, msg in probs:

@@ -13,10 +13,12 @@
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import freeform as F  # noqa: E402
 import knowledge as K  # noqa: E402
 from paths import REPO, REQUESTS  # noqa: E402
 
@@ -57,6 +60,13 @@ def chat_prompt(d):
 
 # ---------- 지식 ----------
 
+def understood(data):
+    """flows.yaml 내용을 화면용으로: 흐름은 구간 목록으로."""
+    return {"components": data.get("components") or {},
+            "flows": {n: {"kind": f.get("kind"), "edges": K.edges(f)} for n, f in (data.get("flows") or {}).items()},
+            "normal": data.get("normal") or []}
+
+
 def get_knowledge(c):
     d = K.cluster_dir(c)
     if not d.is_dir():
@@ -64,65 +74,84 @@ def get_knowledge(c):
     data = K.load_flows(c)
     f = d / "flows.yaml"
     a = d / "architecture.md"
+    incs = K.load_incidents(c)
+    for i in incs:
+        i["text"] = i["body"] or incident_text_from_meta(i["meta"])
     return {
         "cluster": c,
-        "flows": data,
-        "edges": {n: K.edges(fl) for n, fl in (data.get("flows") or {}).items()},
+        "text": a.read_text() if a.is_file() else "",
+        "understood": understood(data),
         "raw": f.read_text() if f.is_file() else "",
-        "architecture": a.read_text() if a.is_file() else "",
-        "incidents": K.load_incidents(c),
+        "incidents": incs,
         "check": [{"level": lv, "msg": m} for lv, m in K.check(c, data)],
         "path": rel(d),
     }
 
 
-def save_flows(c, body):
+def incident_text_from_meta(m):
+    """예전(폼으로 쓴) 이슈를 글로 보여 주기."""
+    parts = [str(m.get("date") or ""), m.get("cause") or ""]
+    if m.get("found_by"):
+        parts.append("찾은 방법: %s" % m["found_by"])
+    logs = (m.get("signature") or {}).get("logs") if isinstance(m.get("signature"), dict) else None
+    if logs:
+        parts.append("로그: " + ", ".join('"%s"' % x for x in logs))
+    return "\n".join(p for p in parts if p)
+
+
+def build(c, text):
+    """자유 글 → flows.yaml dict + 메모. 클러스터에서 온 값(워크로드·종류)만 이어받고 별명 등은 글이 정한다."""
+    old = K.load_flows(c).get("components") or {}
+    keep = {n: {k: v for k, v in (x or {}).items() if k in ("workload", "kind")} for n, x in old.items()}
+    keep = {n: x for n, x in keep.items() if x.get("kind") or n.lower() in text.lower()}
+    wl = workloads(c).get("workloads") or []
+    parts, notes = F.extract(text, keep, wl)
+    data = {"schema": "koa.knowledge/v1", "cluster": c}
+    data.update(parts)
+    return data, notes
+
+
+def preview_text(c, body):
+    data, notes = build(c, body.get("text") or "")
+    return {"understood": understood(data), "notes": notes,
+            "check": [{"level": lv, "msg": m} for lv, m in K.check(c, data)]}
+
+
+def save_text(c, body):
     d = K.cluster_dir(c)
-    if "raw" in body:
-        text = body["raw"]
-        data = yaml.safe_load(text) or {}
-        if not isinstance(data, dict):
-            raise ValueError("flows.yaml 최상위는 매핑이어야 한다")
-    else:
-        data = body["data"]
-        if not isinstance(data, dict):
-            raise ValueError("data 형식 오류")
-        data = {"schema": data.get("schema") or "koa.knowledge/v1", "cluster": c,
-                "components": data.get("components") or {}, "flows": data.get("flows") or {},
-                "normal": data.get("normal") or []}
-        text = ("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
-                "# 웹 화면(koa/web.py)에서 저장함. 직접 고쳐도 된다.\n"
-                + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
+    text = body.get("text") or ""
+    data, notes = build(c, text)
+    out = ("# KOA 클러스터 지식 — 구조. architecture.md (자유 글) 에서 웹 화면이 자동으로 뽑았다.\n"
+           "# 고치려면 architecture.md 를 고치고 웹에서 저장한다 (이 파일을 직접 고치면 다음 저장 때 덮인다).\n"
+           + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
     with _lock:
+        (d / "architecture.md").write_text(text)
         f = d / "flows.yaml"
         if f.is_file():
             (d / "flows.yaml.bak").write_text(f.read_text())
-        f.write_text(text)
-    return [{"level": lv, "msg": m} for lv, m in K.check(c, data)]
+        f.write_text(out)
+    return {"understood": understood(data), "notes": notes,
+            "check": [{"level": lv, "msg": m} for lv, m in K.check(c, data)]}
 
 
-def save_architecture(c, body):
-    d = K.cluster_dir(c)
-    with _lock:
-        (d / "architecture.md").write_text(body.get("text") or "")
+def incident_preview(c, body):
+    comps = K.load_flows(c).get("components") or {}
+    return F.incident_meta(body.get("text") or "", comps, K.find_symptom)
 
 
 def save_incident(c, body):
     d = K.cluster_dir(c) / "incidents"
     d.mkdir(parents=True, exist_ok=True)
-    meta = body.get("meta") or {}
-    if not isinstance(meta, dict):
-        raise ValueError("meta 형식 오류")
-    meta = {k: v for k, v in meta.items() if v not in (None, "", [], {})}
-    try:
-        meta["date"] = dt.date.fromisoformat(str(meta.get("date")))  # yaml 에 따옴표 없는 날짜로
-    except ValueError:
-        pass
-    name = body.get("file") or "%s-%s.md" % (meta.get("date") or dt.date.today().isoformat(), K.slug(meta.get("cause") or ""))
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise ValueError("내용이 비었다")
+    meta = incident_preview(c, body)
+    meta.setdefault("date", dt.date.today())
+    name = body.get("file") or "%s-%s.md" % (meta["date"].isoformat(), K.slug(meta.get("cause") or ""))
     if not FILE_RE.match(name):
         raise ValueError("파일 이름 형식 오류: %s" % name)
     with _lock:
-        (d / name).write_text(K.incident_text(meta, body.get("body") or ""))
+        (d / name).write_text(K.incident_text(meta, text))
     return name
 
 
@@ -132,6 +161,53 @@ def delete_incident(c, name):
     f = K.cluster_dir(c) / "incidents" / name
     if f.is_file():
         f.unlink()
+
+
+# ---------- 클러스터 등록 도우미 ----------
+
+def kubeconfig_context():
+    """읽기 전용 kubeconfig 의 현재 컨텍스트에서 -readonly 를 뺀 이름 (트리아지가 쓰는 클러스터 이름)."""
+    kc = Path(os.environ.get("KOA_KUBECONFIG") or Path.home() / ".kube" / "hermes-readonly.yaml").expanduser()
+    try:
+        ctx = (yaml.safe_load(kc.read_text()) or {}).get("current-context") or ""
+    except (OSError, yaml.YAMLError):
+        return None
+    return re.sub(r"-readonly$", "", ctx) or None
+
+
+def cluster_info():
+    have = K.clusters()
+    cands = []
+    for n in K.discovered() + [kubeconfig_context()]:
+        if n and K.NAME_RE.match(n) and n not in have and n not in cands:
+            cands.append(n)
+    return {"clusters": have, "candidates": cands, "context": kubeconfig_context()}
+
+
+_wl_cache = {}
+
+
+def workloads(cluster):
+    """구성요소 워크로드 입력 도우미: 읽기 전용 kubeconfig 로 Deployment·StatefulSet·DaemonSet 목록 (get/list 만)."""
+    K.cluster_dir(cluster)  # 이름 검사
+    hit = _wl_cache.get(cluster)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    kc = Path(os.environ.get("KOA_KUBECONFIG") or Path.home() / ".kube" / "hermes-readonly.yaml").expanduser()
+    prof = K.profile(cluster) or {}
+    ctx = (prof.get("kubeconfig") or {}).get("context")
+    cmd = ["kubectl", "--kubeconfig", str(kc), "--request-timeout=15s"] + (["--context", ctx] if ctx else []) + \
+          ["get", "deployments,statefulsets,daemonsets", "-A", "-o",
+           "jsonpath={range .items[*]}{.metadata.namespace}/{.kind}/{.metadata.name}{\"\\n\"}{end}"]
+    try:
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as x:
+        return {"workloads": [], "error": "kubectl 실행 실패: %s" % x}
+    if p.returncode != 0:
+        return {"workloads": [], "error": p.stderr.decode("utf-8", "replace").strip()[:200]}
+    out = {"workloads": sorted(x for x in p.stdout.decode().splitlines() if x.count("/") == 2)}
+    _wl_cache[cluster] = (time.time(), out)
+    return out
 
 
 # ---------- 조사 요청 ----------
@@ -255,19 +331,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "not found"})
             p = parts[1:]
             if method == "GET" and p == ["clusters"]:
-                return self._send(200, {"clusters": K.clusters(), "knowledge": rel(K.KNOWLEDGE), "symptoms": K.SYMPTOM_NAMES})
+                return self._send(200, dict(cluster_info(), knowledge=rel(K.KNOWLEDGE), symptoms=K.SYMPTOM_NAMES))
             if method == "POST" and p == ["clusters"]:
-                K.init(body.get("name") or "")
+                K.init(body.get("name") or "", bool(body.get("example")))
                 return self._send(200, {"ok": True})
+            if method == "GET" and len(p) == 2 and p[0] == "workloads":
+                return self._send(200, workloads(p[1]))
             if p[:1] == ["knowledge"] and len(p) >= 2:
                 c = p[1]
                 if method == "GET" and len(p) == 2:
                     return self._send(200, get_knowledge(c))
-                if method == "POST" and p[2:] == ["flows"]:
-                    return self._send(200, {"check": save_flows(c, body)})
-                if method == "POST" and p[2:] == ["architecture"]:
-                    save_architecture(c, body)
-                    return self._send(200, {"ok": True})
+                if method == "POST" and p[2:] == ["preview"]:
+                    return self._send(200, preview_text(c, body))
+                if method == "POST" and p[2:] == ["text"]:
+                    return self._send(200, save_text(c, body))
+                if method == "POST" and p[2:] == ["incidents", "preview"]:
+                    return self._send(200, {"meta": incident_preview(c, body)})
                 if method == "POST" and p[2:] == ["incidents"]:
                     return self._send(200, {"file": save_incident(c, body)})
                 if method == "POST" and p[2:3] == ["incidents"] and p[4:] == ["delete"]:
