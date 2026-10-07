@@ -108,8 +108,34 @@ def init(cluster, example=False):
                      "# 예시: koa/templates/knowledge/flows.yaml\n"
                      + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
     a = d / "architecture.md"
-    a.write_text(a.read_text().replace("<클러스터>", cluster, 1))
+    if example:
+        a.write_text(a.read_text().replace("<클러스터>", cluster, 1))
+    else:
+        a.write_text(STARTER % (cluster, ", ".join(data["components"]) or "(없음)"))
     return d
+
+
+STARTER = """# %s
+
+<!--
+자유롭게 쓰세요. KOA 는 아래 같은 줄을 알아듣고 분석 경로로 씁니다. (이 안내는 읽지 않습니다)
+  사용자 → ingress-nginx → gateway → order-api → orders-db      화살표 줄 = 요청이 지나는 길
+  order-api → rabbitmq(rmq, 래빗) → order-worker               큐를 지나면 넣기/꺼내기로 이해, 괄호 안은 별명
+  orders-db 는 클러스터 밖 RDS. 문제가 나면 "Too many connections" 가 찍힌다   따옴표 = 먼저 찾을 로그 문구
+  매일 02:00 배치 때 order-worker 큐가 쌓였다 빠진다             정상 패턴 (오탐 줄이기)
+-->
+
+탐색에서 찾은 것: %s
+
+## 서비스 구조
+
+
+## 요청 흐름
+
+
+## 운영하면서 알게 된 것
+
+"""
 
 
 def load_flows(cluster):
