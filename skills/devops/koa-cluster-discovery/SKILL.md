@@ -85,8 +85,8 @@ not in ad-hoc chat text.
 흐름(flow) 경로의 노드와 구성요소(component)는 정확 일치만 되던 걸, 부분 매칭으로 개선했다(커밋 8b2d65c).
 - 매칭 대상은 구성요소 이름 + `aliases`(질문 매칭용) + `flow_nodes`(흐름 매칭 전용).
   노드가 그 이름과 같거나 한쪽이 다른 쪽을 부분 문자열로 포함하면 매칭(node_to_comps).
-- 여러 구성요소가 같은 흐름 이름을 공유할 수 있다. 예: 흐름 노드 `OpenAPI G/W or Console Wrapper`
-  ↔ admin/manager/user-console-wrapper 둘 다 `flow_nodes: [Console Wrapper]` 로 매칭.
+- 여러 구성요소가 같은 흐름 이름을 공유할 수 있다. 예: 흐름 노드 `Gateway` 는
+  `flow_nodes: [Gateway]` 를 둔 접근 게이트웨이 구성요소 여러 개를 동시에 가리킨다(예: public/manager/admin 게이트웨이).
 - `aliases` 는 질문에서 대상을 찾는 데 쓰므로 공통 이름을 넣으면 '질문에서 대상을 못 가린다' warn이 난다.
   공통 이름은 `flow_nodes` 에, 고유한 부르는 말은 `aliases` 에 넣는다.
 - 질문이 여러 구성요소와 매칭되면(동점) plan 은 target 을 고정하지 않고 `candidates` 를 내보낸다.
