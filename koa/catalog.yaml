@@ -117,6 +117,26 @@ components:
     fallback: 파드 로그와 앱 로그의 연결 오류·타임아웃으로 본다
     image: '(^|/)redis$|bitnami/redis$|valkey'
     ports: [6379]
+  postgresql:
+    kind: database
+    fallback: DB 파드 로그와 앱 로그의 연결 오류·쿼리 지연으로 본다. 쿼리 성능은 MCP 범위 밖.
+    image: '(^|/)postgres(ql)?$|(^|/)pglite$|(^|/)pgbouncer$|bitnami/postgresql$'
+    ports: [5432]
+  mariadb:
+    kind: database
+    fallback: DB 파드 로그와 앱 로그의 연결 오류·쿼리 지연으로 본다
+    image: '(^|/)mariadb$|bitnami/mariadb$'
+    ports: [3306]
+  mysql:
+    kind: database
+    fallback: DB 파드 로그와 앱 로그의 연결 오류·쿼리 지연으로 본다
+    image: '(^|/)mysql$|(^|/)mysql-server$|bitnami/mysql$'
+    ports: [3306]
+  mongodb:
+    kind: database
+    fallback: DB 파드 로그와 앱 로그의 연결 오류·쿼리 지연으로 본다
+    image: '(^|/)mongo(db)?$|bitnami/mongodb$'
+    ports: [27017]
   ingress-nginx:
     kind: ingress
     fallback: 접근 로그가 로그 저장소에 있으면 경로별 status·request_time 을 집계한다. 없으면 컨트롤러 파드 로그(kubectl_logs)
