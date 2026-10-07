@@ -76,11 +76,14 @@ components:                    # 사람이 부르는 이름 → k8s 워크로드
     external: true               # 클러스터 밖. k8s 로 상태를 못 보니 증상 문구로 판정
     aliases: [주문 DB, mysql]
     log_signatures: ["Communications link failure", "Too many connections", "Lock wait timeout"]
+  api-gateway:
+    workload: shop/Deployment/api-gateway
+    flow_nodes: [Gateway]        # 흐름 경로 노드의 글자와 매칭 (부분 문자열). aliases 와 달리 여럿이 공유 가능
 
 flows:
   http-order:                  # 사용자 요청 흐름
     kind: http
-    hops: [ingress-nginx, gateway, order-api, orders-db]
+    hops: [user, Gateway, order-api, orders-db]   # 'Gateway' 노드는 flow_nodes 로 api-gateway 를 가리킴
   order-async:                 # 비동기 처리 흐름
     kind: queue
     hops:
@@ -117,7 +120,7 @@ found_by: "rabbitmq 파드 로그의 alarm 문구"
 | 분석 후 자동 제안 | 원인을 사용자가 확인하면 이슈 파일 초안을 만들어 확인받는다 |
 | 직접 편집 | 파일을 고치면 다음 분석부터 반영 |
 
-검증 (`koa/knowledge.py check`): `workload` 가 실제 클러스터에 없거나, flows 의 hop 이 components 에 없으면 알린다. 지식이 틀리면 경로가 틀리므로, 분석 보고서에도 "지식과 실제가 다른 곳" 을 적는다.
+검증 (`koa/knowledge.py check`): `workload` 가 실제 클러스터에 없거나, flows 의 hop 이 components 에 매칭되지 않으면 알린다. hop 은 구성요소 이름·aliases·flow_nodes 와 부분 문자열로 매칭한다(예: 노드 `OpenAPI G/W or Console Wrapper` ↔ `flow_nodes: [Console Wrapper]` 둔 admin/manager/user-console-wrapper 모두). 지식이 틀리면 경로가 틀리므로, 분석 보고서에도 "지식과 실제가 다른 곳" 을 적는다.
 
 ## 2. ② 조사 요청 → 조사 계획
 
@@ -138,7 +141,7 @@ known: [2026-08-14-rmq-disk-alarm]   # symptom·components 가 겹치는 과거 
 
 계획 만드는 규칙 (`koa/knowledge.py plan "<질문>"`):
 
-1. **대상 찾기**: 질문 단어를 components 의 이름·aliases 와 맞춘다. 못 찾으면 트리아지 상위 이상 징후를 대상으로 쓴다.
+1. **대상 찾기**: 질문 단어를 components 의 이름·aliases·flow_nodes 와 맞춘다. 매칭되는 후보가 **하나**면 그걸 대상으로 고정하고, 여러 개가 동점으로 걸리면(예: `Console Wrapper` 를 `flow_nodes` 로 둔 admin/manager/user-console-wrapper 셋) 하나로 추측하지 않고 **후보(candidates)를 내보내 사용자가 조사 시 직접 고른다**. 반환된 계획에 `candidates` 가 있으면 웹 UI 조사 요청에서 '대상을 직접 선택' 칩으로 고르고, 고르면 확인 순서가 그 대상 기준으로 재구성된다. 아무것도 못 찾으면 트리아지 상위 이상 징후를 대상으로 쓴다.
 2. **증상 유형**: 질문 문구로 3절 표의 유형을 고른다 ("소비가 안 됨/쌓임" → queue-backlog, "느려/타임아웃" → latency, "5xx/에러" → errors, "로그가 안 보여" → log-pipeline …).
 3. **경로**: 대상을 지나는 flows 를 찾고, 증상 유형이 정한 방향으로 hop 을 정렬한다. queue-backlog 는 소비자 → 브로커 → 소비자의 하류 → 생산자, latency/errors 는 사용자에 가까운 쪽부터 하류로.
 4. **과거 이슈**: symptom 이나 components 가 겹치는 이슈를 붙이고, signature 를 1순위 확인 항목으로 올린다.

@@ -80,7 +80,7 @@ python3 koa/web.py                 # http://127.0.0.1:8765  (--port 로 변경)
 
 | 항목 | 규칙 |
 |---|---|
-| 대상 | 질문 안에 구성요소 이름·별칭이 들어 있으면 그것 (가장 긴 일치). 없으면 트리아지 상위 이상 징후로 |
+| 대상 | 질문 안에 구성요소 이름·별칭·흐름 매칭 이름(flow_nodes)이 들어 있는지 본다. 후보가 하나면 그것(가장 긴 일치), 여러 개가 동점이면(예: Console Wrapper 를 flow_nodes 로 둔 admin/manager/user-console-wrapper) 후보(candidates)를 내보내 조사 화면에서 사용자가 직접 고른다. 없으면 트리아지 상위 이상 징후로 |
 | 증상 유형 | 질문 문구 (소비·쌓임 → queue-backlog, 느려·타임아웃 → latency, 5xx·에러 → errors, 재시작·죽 → crash …) |
 | 기간 | "30분", "2시간" 같은 말, 없으면 1h. 화면에서 직접 지정 가능 |
 | 확인 순서 | queue-backlog: 소비자 → 브로커 → 소비자의 하류 → 생산자 / crash·pending: 대상 → 대상의 하류 / 그 외: 흐름 순서 |
