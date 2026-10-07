@@ -288,9 +288,10 @@ async function loadClusters(select) {
   const all = j.clusters.concat(S.cands), sel = $("#cluster");
   sel.innerHTML = j.clusters.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")
     + S.cands.map(c => `<option value="${esc(c)}">${esc(c)} · 지식 없음</option>`).join("") || '<option value="">클러스터 없음</option>';
-  const want = select || store.get("cluster");
+  const want = select || j.auto_onboarded || store.get("cluster");
   if (want && all.includes(want)) sel.value = want;
   await setCluster(sel.value || null);
+  if (j.auto_onboarded) toast("클러스터를 자동으로 연결했습니다: " + j.auto_onboarded, 3500);
 }
 $("#cluster").onchange = e => { if (S.dirty && !confirm("저장하지 않은 설명이 있습니다. 바꿀까요?")) { e.target.value = S.cluster; return; } setCluster(e.target.value); };
 $("#newCluster").onclick = () => { S.register = true; showTab(S.tab); };

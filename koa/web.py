@@ -185,14 +185,32 @@ def cluster_name(n):
     return n or None
 
 
+def auto_onboard():
+    """kubeconfig 컨텍스트가 가리키는 클러스터를 아직 지식이 없으면 자동으로 온보딩한다
+    (지식 폴더 생성 + 탐색 프로필에서 구성요소 seed). 이미 온보딩됐으면 그대로 둔다.
+    반환: 방금 자동 등록한 클러스터명, 없으면 None."""
+    cname = cluster_name(kubeconfig_context())
+    if not cname or not K.NAME_RE.match(cname):
+        return None
+    if K.cluster_dir(cname).is_dir():
+        return None  # 이미 온보딩됨
+    try:
+        K.init(cname, example=False)
+        return cname
+    except ValueError:
+        return None
+
+
 def cluster_info():
+    auto = auto_onboard()
     have = K.clusters()
     cands = []
     for n in K.discovered() + [kubeconfig_context()]:
         cname = cluster_name(n)
         if cname and K.NAME_RE.match(cname) and cname not in have and cname not in cands:
             cands.append(cname)
-    return {"clusters": have, "candidates": cands, "context": kubeconfig_context()}
+    return {"clusters": have, "candidates": cands, "context": kubeconfig_context(),
+            "auto_onboarded": auto}
 
 
 _wl_cache = {}
