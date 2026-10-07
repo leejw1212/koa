@@ -75,6 +75,18 @@ label.f { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2
   </nav>
 </header>
 <main>
+<section class="card" id="register" hidden>
+  <h2>클러스터 지식 시작하기</h2>
+  <p class="hint">따로 입력할 정보는 없고 <b>클러스터 이름</b>만 정하면 됩니다. KOA 는 이 이름으로 지식·트리아지·조사 요청을 묶습니다. 이름은 탐색 결과(<code>koa/discover.py</code>)나 읽기 전용 kubeconfig 컨텍스트에서 <code>-readonly</code> 를 뺀 것과 같아야 트리아지 결과와 맞습니다.</p>
+  <div id="regCands"></div>
+  <div class="row" style="margin-top:10px">
+    <span class="muted">직접 입력</span>
+    <input id="regName" style="max-width:220px" placeholder="예: prod-a">
+    <button class="btn" id="regGo">시작</button>
+    <label class="row" style="gap:4px"><input type="checkbox" id="regExample"> 예시(order-api·rabbitmq 등)로 채워서 연습</label>
+  </div>
+  <p class="hint" style="margin-top:10px">시작하면 탐색에서 찾은 메시지 큐·캐시·ingress 가 구성요소로 미리 들어갑니다. 나머지(앱 워크로드, 흐름)는 "클러스터 지식" 탭에서 표로 채웁니다. 워크로드 칸은 클러스터의 실제 목록에서 고를 수 있습니다.</p>
+</section>
 
 <!-- 조사 요청 -->
 <div id="tab-ask">
@@ -117,7 +129,7 @@ label.f { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2
       <thead><tr><th style="width:15%">이름</th><th style="width:24%">워크로드</th><th style="width:12%">종류</th><th style="width:9%">중요도</th><th>별칭</th><th style="width:4%">밖</th><th style="width:18%">밖일 때 로그 문구</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
-    <button class="btn" id="addComp" style="margin-top:8px">+ 구성요소</button>
+    <div class="row" style="margin-top:8px"><button class="btn" id="addComp">+ 구성요소</button><span class="muted" id="wlHint"></span></div>
   </section>
   <section class="card">
     <h2>흐름</h2>
@@ -176,9 +188,10 @@ label.f { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2
   </section>
 </div>
 
-<div id="empty" class="empty" hidden></div>
+
 </main>
 <datalist id="compNames"></datalist>
+<datalist id="workloadNames"></datalist>
 <div id="toast"></div>
 
 <script>
@@ -186,7 +199,7 @@ label.f { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2
 const $ = (s, el) => (el || document).querySelector(s);
 const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const S = { cluster: null, k: null, symptoms: [], tab: "ask", incFile: null, poll: null };
+const S = { cluster: null, k: null, symptoms: [], tab: "ask", incFile: null, poll: null, cands: [], register: false, workloads: [] };
 
 function toast(msg, ms) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", ms || 2200); }
 async function api(path, body) {
@@ -203,9 +216,16 @@ function showTab(t) {
   S.tab = t; store.set("tab", t);
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   ["ask", "results", "knowledge", "incidents"].forEach(x => $("#tab-" + x).hidden = x !== t);
-  const needK = (t === "knowledge" || t === "incidents") && !S.k;
-  $("#empty").hidden = !needK;
-  if (needK) { $("#tab-" + t).hidden = true; $("#empty").innerHTML = S.cluster ? "이 클러스터에는 아직 지식이 없습니다." : "먼저 <b>+ 새 클러스터</b> 로 클러스터 지식을 만드세요. 템플릿 예시가 채워진 채로 시작합니다."; }
+  const needK = ((t === "knowledge" || t === "incidents") && !S.k) || (t === "ask" && !S.cluster) || S.register;
+  $("#register").hidden = !needK;
+  if (needK) {
+    if (t !== "ask") $("#tab-" + t).hidden = true;
+    $("#regName").value = S.cluster && !S.k ? S.cluster : "";
+    $("#regCands").innerHTML = S.cands.length
+      ? '<div class="row">' + S.cands.map(c => `<button class="btn primary" data-reg="${esc(c)}">${esc(c)} 으로 시작</button>`).join("") + '<span class="muted">← 이 컴퓨터에서 찾은 클러스터</span></div>'
+      : '<p class="muted">탐색한 클러스터를 찾지 못했습니다. KOA 채팅에서 "클러스터 확인하고 MCP 세팅해줘" 로 탐색하면 여기에 나옵니다. 아래에 직접 입력해도 됩니다.</p>';
+    $$("#regCands [data-reg]").forEach(b => b.onclick = () => register(b.dataset.reg));
+  }
   if (t === "results") loadResults();
   clearInterval(S.poll);
 }
@@ -216,18 +236,25 @@ async function loadClusters(select) {
   S.symptoms = j.symptoms;
   $("#i-symptom").innerHTML = '<option value="">(모름)</option>' + j.symptoms.map(s => `<option>${esc(s)}</option>`).join("");
   const sel = $("#cluster");
-  sel.innerHTML = j.clusters.map(c => `<option>${esc(c)}</option>`).join("") || '<option value="">(없음)</option>';
+  S.cands = j.candidates || [];
+  const all = j.clusters.concat(S.cands);
+  sel.innerHTML = j.clusters.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")
+    + S.cands.map(c => `<option value="${esc(c)}">${esc(c)} (지식 없음)</option>`).join("") || '<option value="">(없음)</option>';
   const want = select || store.get("cluster");
-  if (want && j.clusters.includes(want)) sel.value = want;
+  if (want && all.includes(want)) sel.value = want;
   await setCluster(sel.value || null);
 }
 $("#cluster").onchange = e => setCluster(e.target.value);
-$("#newCluster").onclick = async () => {
-  const name = prompt("클러스터 이름 (영문·숫자·_.-). 트리아지 결과 이름과 같게 하세요 (예: kind-lab, prod-a)");
-  if (!name) return;
-  try { await api("clusters", { name }); toast("만들었습니다: 템플릿 예시를 실제 내용으로 바꾸세요"); await loadClusters(name); showTab("knowledge"); }
-  catch (e) { toast(e.message, 4000); }
-};
+$("#newCluster").onclick = () => { S.register = true; showTab(S.tab); $("#register").scrollIntoView({ behavior: "smooth" }); };
+$("#regGo").onclick = () => { const n = $("#regName").value.trim(); if (n) register(n); else toast("이름을 입력하세요"); };
+async function register(name) {
+  try {
+    await api("clusters", { name, example: $("#regExample").checked });
+    S.register = false;
+    toast($("#regExample").checked ? "만들었습니다: 예시를 실제 내용으로 바꾸세요" : "만들었습니다: 구성요소와 흐름을 채워 주세요", 3500);
+    await loadClusters(name); showTab("knowledge");
+  } catch (e) { toast(e.message, 4000); }
+}
 
 async function setCluster(c) {
   S.cluster = c; S.k = null;
@@ -244,7 +271,7 @@ function compRow(name, c, isNew) {
   const tr = document.createElement("tr");
   tr._orig = c;
   tr.innerHTML = `<td><input data-f="name" value="${esc(name)}"></td>
-    <td><input data-f="workload" value="${esc(c.workload)}"${ph("shop/Deployment/order-api")}></td>
+    <td><input data-f="workload" list="workloadNames" value="${esc(c.workload)}"${ph("shop/Deployment/order-api")}></td>
     <td><input data-f="kind" value="${esc(c.kind)}"${ph("message-queue")}></td>
     <td><select data-f="tier"><option value=""></option>${["critical","normal","batch"].map(t => `<option ${c.tier===t?"selected":""}>${t}</option>`).join("")}</select></td>
     <td><input data-f="aliases" value="${esc(csv(c.aliases))}"${ph("rmq, 래빗")}></td>
@@ -253,6 +280,7 @@ function compRow(name, c, isNew) {
     <td><button class="x" title="삭제">×</button></td>`;
   $(".x", tr).onclick = () => { tr.remove(); refreshNames(); };
   $$("input", tr).forEach(i => i.addEventListener("change", refreshNames));
+  $("[data-f=workload]", tr).addEventListener("change", e => { const n = $("[data-f=name]", tr); if (!n.value.trim()) { n.value = e.target.value.split("/").pop(); refreshNames(); } });
   return tr;
 }
 function readComps() {
@@ -335,6 +363,13 @@ function normalRow(n) {
   return tr;
 }
 
+async function loadWorkloads(c) {
+  let j; try { j = await api("workloads/" + encodeURIComponent(c)); } catch (e) { j = { workloads: [], error: e.message }; }
+  if (c !== S.cluster) return;
+  $("#workloadNames").innerHTML = j.workloads.map(w => `<option value="${esc(w)}">`).join("");
+  $("#wlHint").textContent = j.workloads.length ? `워크로드 칸을 누르면 클러스터의 실제 목록 ${j.workloads.length}개에서 고를 수 있습니다. 고르면 이름도 채워집니다.`
+    : "클러스터 워크로드 목록을 못 불러와 직접 입력합니다" + (j.error ? ` (${j.error})` : "");
+}
 function renderChecks(list) {
   $("#checks").innerHTML = list && list.length ? list.map(c => `<div class="lv-${c.level}">${c.level === "error" ? "❌" : "⚠"} ${esc(c.msg)}</div>`).join("") : '<div class="lv-ok">✅ 문제 없음</div>';
 }
@@ -350,6 +385,7 @@ function renderKnowledge() {
   (k.flows.normal || []).forEach(n => nt.appendChild(normalRow(n)));
   $("#raw").value = k.raw; $("#arch").value = k.architecture;
   refreshNames();
+  loadWorkloads(k.cluster);
 }
 $("#addComp").onclick = () => { $("#compTable tbody").appendChild(compRow("", {}, true)); };
 $("#addFlow").onclick = () => { const d = flowBox("", { kind: "http" }, null); $("#flows").appendChild(d); drawChain(d); };

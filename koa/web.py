@@ -13,10 +13,12 @@
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -132,6 +134,53 @@ def delete_incident(c, name):
     f = K.cluster_dir(c) / "incidents" / name
     if f.is_file():
         f.unlink()
+
+
+# ---------- 클러스터 등록 도우미 ----------
+
+def kubeconfig_context():
+    """읽기 전용 kubeconfig 의 현재 컨텍스트에서 -readonly 를 뺀 이름 (트리아지가 쓰는 클러스터 이름)."""
+    kc = Path(os.environ.get("KOA_KUBECONFIG") or Path.home() / ".kube" / "hermes-readonly.yaml").expanduser()
+    try:
+        ctx = (yaml.safe_load(kc.read_text()) or {}).get("current-context") or ""
+    except (OSError, yaml.YAMLError):
+        return None
+    return re.sub(r"-readonly$", "", ctx) or None
+
+
+def cluster_info():
+    have = K.clusters()
+    cands = []
+    for n in K.discovered() + [kubeconfig_context()]:
+        if n and K.NAME_RE.match(n) and n not in have and n not in cands:
+            cands.append(n)
+    return {"clusters": have, "candidates": cands, "context": kubeconfig_context()}
+
+
+_wl_cache = {}
+
+
+def workloads(cluster):
+    """구성요소 워크로드 입력 도우미: 읽기 전용 kubeconfig 로 Deployment·StatefulSet·DaemonSet 목록 (get/list 만)."""
+    K.cluster_dir(cluster)  # 이름 검사
+    hit = _wl_cache.get(cluster)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    kc = Path(os.environ.get("KOA_KUBECONFIG") or Path.home() / ".kube" / "hermes-readonly.yaml").expanduser()
+    prof = K.profile(cluster) or {}
+    ctx = (prof.get("kubeconfig") or {}).get("context")
+    cmd = ["kubectl", "--kubeconfig", str(kc), "--request-timeout=15s"] + (["--context", ctx] if ctx else []) + \
+          ["get", "deployments,statefulsets,daemonsets", "-A", "-o",
+           "jsonpath={range .items[*]}{.metadata.namespace}/{.kind}/{.metadata.name}{\"\\n\"}{end}"]
+    try:
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as x:
+        return {"workloads": [], "error": "kubectl 실행 실패: %s" % x}
+    if p.returncode != 0:
+        return {"workloads": [], "error": p.stderr.decode("utf-8", "replace").strip()[:200]}
+    out = {"workloads": sorted(x for x in p.stdout.decode().splitlines() if x.count("/") == 2)}
+    _wl_cache[cluster] = (time.time(), out)
+    return out
 
 
 # ---------- 조사 요청 ----------
@@ -255,10 +304,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "not found"})
             p = parts[1:]
             if method == "GET" and p == ["clusters"]:
-                return self._send(200, {"clusters": K.clusters(), "knowledge": rel(K.KNOWLEDGE), "symptoms": K.SYMPTOM_NAMES})
+                return self._send(200, dict(cluster_info(), knowledge=rel(K.KNOWLEDGE), symptoms=K.SYMPTOM_NAMES))
             if method == "POST" and p == ["clusters"]:
-                K.init(body.get("name") or "")
+                K.init(body.get("name") or "", bool(body.get("example")))
                 return self._send(200, {"ok": True})
+            if method == "GET" and len(p) == 2 and p[0] == "workloads":
+                return self._send(200, workloads(p[1]))
             if p[:1] == ["knowledge"] and len(p) >= 2:
                 c = p[1]
                 if method == "GET" and len(p) == 2:
