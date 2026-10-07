@@ -72,6 +72,21 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); p
 .disc-item { gap: 8px; padding: 3px 0; align-items: flex-start; }
 .disc-item b { font-size: 13px; }
 .disc-item .faint { font-size: 12px; word-break: break-all; }
+/* 지식 파편 편집 카드 */
+#shardList .sec { margin-top: 14px; }
+.btn.mini { font-size: 12px; padding: 2px 8px; margin-left: 6px; border-radius: 6px; }
+.shard { border: 1px solid var(--edge-soft); border-radius: 10px; margin: 6px 0; background: var(--glass-soft); }
+.shard > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; list-style: none; position: relative; padding-right: 30px; }
+.shard > summary::-webkit-details-marker { display: none; }
+.shard > summary::before { content: "▶"; font-size: 9px; color: var(--muted); transition: transform .15s; }
+.shard[open] > summary::before { transform: rotate(90deg); }
+.shard > summary b { font-size: 13px; }
+.shard .rm2 { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; line-height: 1; border: none; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; opacity: .5; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.shard .rm2:hover { opacity: 1; color: #e53935; background: var(--danger-soft, rgba(229,57,53,.12)); }
+.shard .field { display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin: 8px 10px; align-items: center; }
+.shard .field label { font-size: 12px; color: var(--muted); }
+.shard .field input, .shard .field select { font-size: 13px; padding: 6px 8px; }
+.shard > .row { margin: 6px 10px 10px; font-size: 13px; }
 textarea { resize: vertical; line-height: 1.7; }
 textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; border-radius: 18px; }
 
@@ -203,21 +218,12 @@ details[open] > summary::before { transform: rotate(90deg); }
 <div id="tab-knowledge" hidden>
   <section class="card glass" style="margin-bottom:12px">
     <div class="row" style="margin-bottom:8px">
-      <h2 class="grow">클러스터 설명</h2>
+      <h2 class="grow">클러스터 지식 편집</h2>
       <span class="faint" id="saveState"></span>
-      <button class="btn primary" id="saveText">저장</button>
+      <button class="btn primary" id="saveShards">저장</button>
     </div>
-    <p class="hint">말하듯 자유롭게 쓰세요. 화살표(<code>→</code>)로 적은 줄은 분석 경로가 되고, 아래에 KOA 가 이해한 것이 바로 보입니다. <span class="faint">⌘/Ctrl + S 로 저장</span></p>
-    <textarea id="kText" class="editor" spellcheck="false"></textarea>
-    <details style="margin-top:12px"><summary>이렇게 쓰면 알아들어요</summary>
-      <pre style="margin-top:8px">사용자 → ingress-nginx → gateway → order-api → orders-db      요청이 지나는 길
-order-api → rabbitmq(rmq, 래빗) → order-worker               큐를 지나면 넣기·꺼내기, 괄호 안은 별명
-orders-db: 주문 DB, mysql, 클러스터 밖                        콜론 뒤는 별명, '밖/외부' 는 클러스터 밖
-order-worker 는 shop/Deployment/order-worker 이고 컨슈머라고도 불러   워크로드·별명
-orders-db 가 죽으면 "Too many connections" 가 찍힌다          따옴표 = 먼저 찾을 로그 문구
-매일 02:00 배치 때 order-worker 큐가 쌓였다 빠진다            정상 패턴 (오탐 줄이기)</pre>
-      <p class="faint">워크로드를 안 적으면 클러스터에서 같은 이름의 워크로드를 찾아 붙입니다. 규칙에 안 맞는 글도 그대로 두면 분석 때 참고로 읽습니다.</p>
-    </details>
+    <p class="hint">지식 조각(파편)을 카드 하나씩 입력하세요. 각 카드를 펼쳐 편집하고, 접어서 목록을 봅니다. 오른쪽 아래에 KOA 가 이해한 것이 바로 반영됩니다. <span class="faint">⌘/Ctrl + S 로 저장</span></p>
+    <div id="shardList"></div>
   </section>
   <div class="split">
     <section class="card glass sticky">
@@ -316,7 +322,7 @@ async function register(name) {
   try {
     await api("clusters", { name, example: $("#regExample").checked });
     S.register = false; toast("만들었습니다. 클러스터를 자유롭게 설명해 주세요", 3000);
-    await loadClusters(name); showTab("knowledge"); $("#kText").focus();
+    await loadClusters(name); showTab("knowledge"); const fi = $("#shardList .field input"); if (fi) fi.focus();
   } catch (e) { toast(e.message, 4000); }
 }
 async function setCluster(c) {
@@ -426,11 +432,153 @@ function understoodHTML(u, notes, check) {
 }
 function renderKnowledge() {
   const k = S.k; if (!k) return;
-  $("#kpath").textContent = k.path; $("#kText").value = k.text; S.dirty = false; $("#saveState").textContent = "";
-  $("#understood").innerHTML = understoodHTML(k.understood, [], k.check);
-  previewText();
+  $("#kpath").textContent = k.path;
+  SH = {
+    components: JSON.parse(JSON.stringify((k.understood.components || {}))),
+    flows: flowsToNodes(k.understood.flows || {}),
+    normal: (k.understood.normal || []).map(x => ({ ...x })),
+  };
+  S.dirty = false; $("#saveState").textContent = "";
+  renderShards();
+  renderUnderstood();
   loadCands();
 }
+// ---------- 지식 파편 편집 ----------
+let SH = { components: {}, flows: [], normal: [] };
+function flowsToNodes(flows) {
+  return Object.entries(flows || {}).map(([name, f]) => {
+    const uniq = [], edges = f.edges || [];
+    edges.forEach(e => { if (!uniq.includes(e.from)) uniq.push(e.from); if (e.to && !uniq.includes(e.to)) uniq.push(e.to); });
+    return { name, kind: f.kind || (uniq.some(n => /rabbit|rmq|kafka|queue|큐/i.test(n)) ? "queue" : "http"), nodes: uniq };
+  });
+}
+const KIND_OPT = { "message-queue": "큐", cache: "캐시·Redis", database: "DB", ingress: "Ingress", "": "— (알아서)" };
+function compSummary(c) {
+  return c.external ? "클러스터 밖" : (c.workload || "워크로드 미지정") + ((c.kind && KIND_OPT[c.kind]) ? " · " + KIND_OPT[c.kind] : "");
+}
+function renderShards() {
+  let h = "";
+  h += `<div class="sec"><div class="label">구성요소 (${Object.keys(SH.components).length}) <button class="btn mini" data-n="addComp">＋ 추가</button></div>`;
+  if (!Object.keys(SH.components).length) h += '<p class="msg faint">구성요소가 없습니다. 위에서 discover로 선택하거나 ＋ 추가로 직접 만드세요.</p>';
+  h += Object.entries(SH.components).map(([n, c]) => `
+    <details class="shard" data-comp="${esc(n)}" ${SH.openComp === n ? "open" : ""}>
+      <summary><b>${esc(n)}</b> <span class="faint">${esc(compSummary(c))}</span>
+        <button class="rm2" data-a="delcomp" data-name="${esc(n)}" title="제외(discover로)">×</button></summary>
+      <div class="field"><label>이름</label><input data-f="name" value="${esc(n)}"></div>
+      <div class="field"><label>워크로드  (ns/Kind/이름)</label><input data-f="workload" value="${esc(c.workload || "")}" placeholder="shop/Deployment/order-api"></div>
+      <div class="field"><label>종류</label><select data-f="kind">
+        ${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}
+      </select></div>
+      <div class="field"><label>별명  (쉼표 구분)</label><input data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
+      <div class="field"><label>로그 문구 (죽으면 찍히는 것)</label><input data-f="log" value="${esc((c.log_signatures || [])[0] || "")}"></div>
+      <label class="row"><input type="checkbox" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (외부 서비스)</label>
+    </details>`).join("");
+  h += "</div>";
+  h += `<div class="sec"><div class="label">흐름 (${SH.flows.length}) <button class="btn mini" data-n="addFlow">＋ 추가</button></div>`;
+  if (!SH.flows.length) h += '<p class="msg faint">요청이 지나는 경로를 추가하세요 (예: 사용자 → gateway → order-api).</p>';
+  h += SH.flows.map((fl, i) => `
+    <details class="shard" data-flow="${i}" ${SH.openFlow === i ? "open" : ""}>
+      <summary><b>${esc(fl.nodes.join(" → "))}</b> <span class="faint">${fl.kind === "queue" ? "큐" : "http"}</span>
+        <button class="rm2" data-a="delflow" data-i="${i}" title="흐름 삭제">×</button></summary>
+      <div class="field"><label>경로  (→ 로 구분)</label><input data-f="nodes" value="${esc(fl.nodes.join(" → "))}"></div>
+      <label class="row"><input type="checkbox" data-f="kind" ${fl.kind === "queue" ? "checked" : ""}> 큐를 지나는 흐름 (생산·소비)</label>
+    </details>`).join("");
+  h += "</div>";
+  h += `<div class="sec"><div class="label">정상 패턴 (${SH.normal.length}) <button class="btn mini" data-n="addNormal">＋ 추가</button></div>`;
+  if (!SH.normal.length) h += '<p class="msg faint">오탐을 줄이려면 정상 동작을 적으세요.</p>';
+  h += SH.normal.map((x, i) => `
+    <details class="shard" data-normal="${i}" ${SH.openNormal === i ? "open" : ""}>
+      <summary><b>${esc(x.component || "(대상)")}</b> <span class="faint">${esc(x.note || "")}</span>
+        <button class="rm2" data-a="delnormal" data-i="${i}" title="정상패턴 삭제">×</button></summary>
+      <div class="field"><label>대상 구성요소</label><input data-f="component" value="${esc(x.component || "")}"></div>
+      <div class="field"><label>정상 동작</label><input data-f="note" value="${esc(x.note || "")}" placeholder="매일 02:00 배치 때 큐가 쌓였다 빠진다"></div>
+    </details>`).join("");
+  h += "</div>";
+  $("#shardList").innerHTML = h;
+  $("#shardList").querySelectorAll("[data-n=addComp]").forEach(b => b.onclick = () => addComp());
+  $("#shardList").querySelectorAll("[data-n=addFlow]").forEach(b => b.onclick = () => addFlow());
+  $("#shardList").querySelectorAll("[data-n=addNormal]").forEach(b => b.onclick = () => addNormal());
+}
+function addComp() {
+  let base = "새-구성요소", i = 1;
+  while (SH.components[base]) base = "새-구성요소-" + (++i);
+  SH.components[base] = { workload: "", kind: "message-queue", aliases: [], log_signatures: [] };
+  SH.openComp = base; dirty(); renderShards();
+}
+function addFlow() {
+  SH.flows.push({ name: "flow-" + (SH.flows.length + 1), kind: "http", nodes: ["a", "b"] });
+  SH.openFlow = SH.flows.length - 1; dirty(); renderShards();
+}
+function addNormal() {
+  SH.normal.push({ component: "", note: "" });
+  SH.openNormal = SH.normal.length - 1; dirty(); renderShards();
+}
+function dirty() { S.dirty = true; $("#saveState").innerHTML = '<span class="dot"></span>저장 안 됨'; }
+// 파편 편집/삭제 (이벤트 위임)
+$("#shardList").addEventListener("input", e => {
+  const inp = e.target, el = e.target.closest("[data-comp],[data-flow],[data-normal]");
+  if (!el || !inp.dataset.f) return;
+  const f = inp.dataset.f;
+  if (el.dataset.comp !== undefined) {
+    const name = el.dataset.comp, c = SH.components[name];
+    if (f === "name") { const nn = inp.value.trim(); if (nn && !SH.components[nn]) { delete SH.components[name]; SH.components[nn] = c; el.dataset.comp = nn; } }
+    else if (f === "aliases") c.aliases = inp.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    else if (f === "log") c.log_signatures = inp.value.trim() ? [inp.value.trim()] : [];
+    else if (f === "external") c.external = inp.checked;
+    else if (f === "kind") c.kind = inp.value || undefined;
+    else c[f] = inp.value;
+  } else if (el.dataset.flow !== undefined) {
+    const fl = SH.flows[+el.dataset.flow];
+    if (f === "nodes") fl.nodes = inp.value.split(/->|→|>/).map(s => s.trim()).filter(Boolean);
+    else if (f === "kind") fl.kind = inp.checked ? "queue" : "http";
+  } else if (el.dataset.normal !== undefined) {
+    const x = SH.normal[+el.dataset.normal];
+    x[f] = f === "component" && inp.value.startsWith("target=") ? inp.value.slice(7) : inp.value;
+  }
+  dirty();
+  renderUnderstood();
+});
+$("#shardList").addEventListener("click", e => {
+  const rm = e.target.closest(".rm2"); if (!rm) return;
+  const a = rm.dataset.a;
+  if (a === "delcomp") {
+    const n = rm.dataset.name;
+    if (!confirm(`구성요소 '${n}' 를 지울까요? (discover로 되돌아갑니다)`)) return;
+    delete SH.components[n]; renderShards(); renderUnderstood();
+  } else if (a === "delflow") { SH.flows.splice(+rm.dataset.i, 1); renderShards(); renderUnderstood(); }
+  else if (a === "delnormal") { SH.normal.splice(+rm.dataset.i, 1); renderShards(); renderUnderstood(); }
+  dirty();
+});
+function renderUnderstood() {
+  $("#understood").innerHTML = understoodHTML({ components: SH.components, flows: flowsToUnderstood(SH.flows), normal: SH.normal }, [], []);
+}
+function flowsToUnderstood(flows) {
+  // 노드체인 -> 이해한 것 표시용 edges
+  const out = {};
+  flows.forEach((fl, i) => {
+    const nodes = fl.nodes;
+    const edges = [];
+    for (let k = 0; k < nodes.length - 1; k++) {
+      const a = nodes[k], b = nodes[k + 1];
+      const isQ = b && /rabbit|rmq|kafka|queue|큐/i.test(b);
+      edges.push({ from: a, to: b, role: fl.kind === "queue" ? (isQ ? "produce" : "consume") : "call" });
+    }
+    out[fl.name || ("flow-" + (i + 1))] = { kind: fl.kind, edges };
+  });
+  return out;
+}
+async function saveShards() {
+  const payload = { components: SH.components, flows: SH.flows, normal: SH.normal };
+  try {
+    const j = await api(kpath() + "/shards", payload);
+    S.dirty = false; $("#saveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
+    S.k = await api(kpath()); renderKnowledge();
+    toast("저장했습니다");
+    const errs = (j.check || []).filter(c => c.level === "error").length;
+    if (errs) toast(`${errs}개 확인 필요 — KOA가 이해한 것 보세요`, 4000);
+  } catch (e) { toast(e.message, 4000); }
+}
+$("#saveShards").onclick = saveShards;
 // 구성요소 제외(×) → flows.yaml에서 빼고 discover 후보로 되돌린다
 $("#understood").addEventListener("click", async e => {
   const btn = e.target.closest(".rm");
@@ -479,23 +627,9 @@ $("#addSel").onclick = async () => {
     if (warn) toast(`${warn}개 확인 필요 — KOA가 이해한 것 보세요`, 4000);
   } catch (e) { toast(e.message, 4000); }
 };
-const previewText = debounce(async () => {
-  if (!S.k) return;
-  try { const j = await api(kpath() + "/preview", { text: $("#kText").value }); $("#understood").innerHTML = understoodHTML(j.understood, j.notes, j.check); } catch (e) { /* 미리보기 실패는 조용히 */ }
-}, 500);
-$("#kText").addEventListener("input", () => { S.dirty = true; $("#saveState").innerHTML = '<span class="dot"></span>저장 안 됨'; previewText(); });
-async function saveText() {
-  try {
-    const j = await api(kpath() + "/text", { text: $("#kText").value });
-    S.dirty = false; $("#saveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
-    $("#understood").innerHTML = understoodHTML(j.understood, j.notes, j.check); toast("저장했습니다");
-    S.k = await api(kpath()); previewPlan();
-  } catch (e) { toast(e.message, 4000); }
-}
-$("#saveText").onclick = saveText;
 document.addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-    if (S.tab === "knowledge" && S.k) { e.preventDefault(); saveText(); }
+    if (S.tab === "knowledge" && S.k) { e.preventDefault(); saveShards(); }
     else if (S.tab === "incidents" && !$("#incForm").hidden) { e.preventDefault(); saveInc(); }
   }
 });

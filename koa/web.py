@@ -378,6 +378,9 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "POST" and p[2:] == ["delete_components"]:
                     removed, comps = K.delete_discovered_components(c, body.get("names") or [])
                     return self._send(200, {"removed": removed, "components": list(comps)})
+                if method == "POST" and p[2:] == ["shards"]:
+                    saved = K.save_shards(c, body)
+                    return self._send(200, {"saved": saved, "check": [{"level": lv, "msg": m} for lv, m in saved["check"]]})
                 if method == "POST" and p[2:] == ["preview"]:
                     return self._send(200, preview_text(c, body))
                 if method == "POST" and p[2:] == ["text"]:

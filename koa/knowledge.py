@@ -209,6 +209,98 @@ def delete_discovered_components(cluster, names):
     return removed, comps
 
 
+def save_shards(cluster, sdata):
+    """구조화 지식(파편)을 flows.yaml 에 직접 쓴다. 자유글 파서 없이 개별 편집 UI 용도.
+    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[시작..끝]}, ...], "normal": [...]}
+    flows 의 nodes 는 노드 체인(문자열 목록)으로 받아 hops 로 변환해 저장한다.
+    반환: {"components":.., "flows":.., "normal":.., "check":[(level,msg),...]} (저장된 flows.yaml dict)."""
+    d = cluster_dir(cluster)
+    f = d / "flows.yaml"
+    comps = {}
+    for n, c in (sdata.get("components") or {}).items():
+        c = c or {}
+        if not n:
+            continue
+        comp = {}
+        for k in ("workload", "kind", "tier", "aliases", "external", "log_signatures"):
+            if c.get(k) is not None and c.get(k) != "" and c.get(k) != []:
+                if k in ("aliases", "log_signatures") and not isinstance(c.get(k), list):
+                    continue
+                comp[k] = c[k]
+        if comp:
+            comps[n] = comp
+    flows = {}
+    from freeform import QUEUE_WORDS  # noqa: E402 — 흐름의 생산/소비 판별
+    for fl in (sdata.get("flows") or []):
+        name = (fl.get("name") or "").strip()
+        nodes = [x.strip() for x in (fl.get("nodes") or []) if x and x.strip()]
+        if not name or len(nodes) < 2:
+            continue
+        queue = [n for n in nodes if QUEUE_WORDS.search(n) or comps.get(n, {}).get("kind") == "message-queue"]
+        if queue:
+            hops = []
+            for a, b in zip(nodes, nodes[1:]):
+                role = "produce" if b in queue else "consume" if a in queue else "call"
+                hops.append({"from": a, "to": b, "role": role})
+            kind = fl.get("kind") or ("queue" if queue else "http")
+        else:
+            hops, kind = nodes, "http"
+        flows[name] = {"kind": kind, "hops": hops}
+    normal = []
+    for x in (sdata.get("normal") or []):
+        c = (x.get("component") or "").strip()
+        note = (x.get("note") or "").strip()
+        if c and note:
+            normal.append({"component": c, "note": note})
+    data = {"schema": "koa.knowledge/v1", "cluster": cluster,
+            "components": comps, "flows": flows, "normal": normal}
+    if f.is_file():
+        (d / "flows.yaml.bak").write_text(f.read_text())
+    with open(f, "w") as fh:
+        fh.write("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
+                 + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
+    # architecture.md(자유글 원본)는 파편 편집이 원본이 되므로 갱신 — 편집 요약으로 덮는다
+    a = d / "architecture.md"
+    comp_lines = "".join("# %s\n%s\n" % (n, _comp_prose(c, n)) for n, c in comps.items())
+    flow_lines = "".join("%s\n" % (" → ".join(_flow_nodes(fl)) + ("  # %s" % fl["kind"] if fl.get("kind") else "")) for fl in flows.values())
+    norm_lines = "".join("%s: %s\n" % (x["component"], x["note"]) for x in normal)
+    a.write_text("# 클러스터 지식 (파편 편집)\n\n%s%s%s" % (comp_lines, flow_lines, norm_lines))
+    return {"components": comps, "flows": flows, "normal": normal,
+            "check": [(lv, m) for lv, m in check(cluster, data)]}
+
+
+def _comp_prose(c, name):
+    parts = []
+    if c.get("workload") and c.get("workload").count("/") == 2:
+        ns, _, wl = c.get("workload").split("/", 2)
+        parts.append("%s 는 %s/%s 이고" % (name, ns, wl))
+    elif c.get("external"):
+        parts.append("%s 는 클러스터 밖이고" % name)
+    al = list(c.get("aliases") or [])
+    if al:
+        parts.append("(%s) 라고도 불러" % ", ".join(al))
+    sg = list(c.get("log_signatures") or [])
+    if sg:
+        parts.append('죽으면 "%s" 이 찍혀' % sg[0])
+    if not parts:
+        parts.append("%s 는 구성요소" % name)
+    return " ".join(parts) + "\n"
+
+
+def _flow_nodes(fl):
+    hops = (fl or {}).get("hops") or []
+    if hops and all(isinstance(h, str) for h in hops):
+        return hops
+    nodes, prev = [], None
+    for h in hops:
+        f = (h or {}).get("from")
+        if f != prev:
+            nodes.append(f)
+        nodes.append((h or {}).get("to"))
+        prev = (h or {}).get("to") or f
+    return [n for n in nodes if n]
+
+
 def init(cluster, example=False):
     """지식 폴더를 만든다. 기본은 빈 구조 + 클러스터 프로필에서 찾은 큐·캐시·ingress.
     example=True 면 템플릿 예시(order-api 등)를 그대로 — 연습용. 실제 클러스터에 쓰면 예시가 분석 경로에 섞인다."""
