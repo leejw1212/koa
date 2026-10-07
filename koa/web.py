@@ -31,6 +31,7 @@ HTML = Path(__file__).resolve().parent / "web" / "index.html"
 ID_RE = re.compile(r"^\d{8}T\d{6}Z$")
 FILE_RE = re.compile(r"^[0-9A-Za-z가-힣._-]{1,80}\.md$")
 _lock = threading.Lock()
+_REMOTE = False  # --host 0.0.0.0 이면 True (외부 접속 허용)
 
 
 def req_dir(cluster, rid=None):
@@ -217,9 +218,12 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("%s\n" % (fmt % args))
 
     def _host_ok(self):
-        # DNS 리바인딩 막기: 이 컴퓨터 주소로 들어온 요청만
+        # 기본(로컬 전용)이면 DNS 리바인딩 막기: 이 컴퓨터 주소로 들어온 요청만.
+        # --host 0.0.0.0 으로 열면 외부 접속을 허용하므로 Host 가드를 푼다 (인증 없음 — 사용자가 위험 인지하고 여는 경우).
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
-        return host in ("127.0.0.1", "localhost", "[::1]")
+        if host in ("127.0.0.1", "localhost", "[::1]"):
+            return True
+        return _REMOTE
 
     def _send(self, code, obj=None, ctype="application/json; charset=utf-8", raw=None):
         data = raw if raw is not None else json.dumps(obj, ensure_ascii=False, default=str).encode()
@@ -296,12 +300,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global _REMOTE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="바인딩 주소 (기본 127.0.0.1 로컬 전용). 0.0.0.0 으로 열면 외부 접속 허용 — 인증이 없어 위험, X-KOA 헤더 가드만 남는다")
     a = ap.parse_args()
-    # 밖으로 여는 옵션은 두지 않는다 (지식에 회사 내부 이름이 들어가고, 인증이 없다)
-    srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
-    print("KOA 웹: http://127.0.0.1:%d  (지식 %s · 요청 %s)  Ctrl+C 로 끝" % (a.port, rel(K.KNOWLEDGE), rel(REQUESTS)))
+    if a.host != "127.0.0.1":
+        _REMOTE = True
+        print("⚠ 경고: %s 으로 열어 외부 접속을 허용했습니다. 인증이 없어 사내망 누구나 지식/쓰기 가능." % a.host)
+    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    print("KOA 웹: http://%s:%d  (지식 %s · 요청 %s)  Ctrl+C 로 끝" % (a.host, a.port, rel(K.KNOWLEDGE), rel(REQUESTS)))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
