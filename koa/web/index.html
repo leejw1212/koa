@@ -68,25 +68,7 @@ input, select, textarea { font: inherit; color: var(--ink); width: 100%; backgro
   border: 1px solid var(--edge-soft); border-radius: 14px; padding: 9px 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); padding: 0; }
-.disc-list { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
-.disc-item { gap: 8px; padding: 3px 0; align-items: flex-start; }
-.disc-item b { font-size: 13px; }
-.disc-item .faint { font-size: 12px; word-break: break-all; }
 /* 지식 파편 편집 카드 */
-#shardList .sec { margin-top: 14px; }
-.btn.mini { font-size: 12px; padding: 2px 8px; margin-left: 6px; border-radius: 6px; }
-.shard { border: 1px solid var(--edge-soft); border-radius: 10px; margin: 6px 0; background: var(--glass-soft); }
-.shard > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; list-style: none; position: relative; padding-right: 30px; }
-.shard > summary::-webkit-details-marker { display: none; }
-.shard > summary::before { content: "▶"; font-size: 9px; color: var(--muted); transition: transform .15s; }
-.shard[open] > summary::before { transform: rotate(90deg); }
-.shard > summary b { font-size: 13px; }
-.shard .rm2 { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; line-height: 1; border: none; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; opacity: .5; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
-.shard .rm2:hover { opacity: 1; color: #e53935; background: var(--danger-soft, rgba(229,57,53,.12)); }
-.shard .field { display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin: 8px 10px; align-items: center; }
-.shard .field label { font-size: 12px; color: var(--muted); }
-.shard .field input, .shard .field select { font-size: 13px; padding: 6px 8px; }
-.shard > .row { margin: 6px 10px 10px; font-size: 13px; }
 textarea { resize: vertical; line-height: 1.7; }
 textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; border-radius: 18px; }
 
@@ -133,8 +115,6 @@ textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; bord
 .comp { padding: 10px 12px; border-radius: 14px; background: var(--glass-soft); border: 1px solid var(--edge-soft); min-width: 0; position: relative; }
 .comp b { font-size: 13.5px; }
 .comp .wl { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; }
-.comp .rm { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; line-height: 1; border-radius: 6px; border: none; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; opacity: .5; display: flex; align-items: center; justify-content: center; }
-.comp .rm:hover { opacity: 1; background: var(--danger-soft, rgba(229,57,53,.12)); color: #e53935; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 .sec { margin-top: 18px; }
 .label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; margin-bottom: 6px; }
@@ -155,6 +135,30 @@ details[open] > summary::before { transform: rotate(90deg); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 .empty { text-align: center; padding: 36px 10px; color: var(--muted); }
 [hidden] { display: none !important; }
+/* 클러스터 지식 */
+.split2 { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .split2 { grid-template-columns: 1fr; } }
+.khdr { margin-bottom: 4px; }
+.klist { display: flex; flex-direction: column; gap: 6px; }
+.krow { border-radius: 14px; border: 1px solid var(--edge-soft); background: var(--glass-soft); transition: background .15s, border-color .15s; }
+.krow:hover { background: var(--glass-strong); }
+.krow.open { background: var(--glass-strong); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ksum { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; min-height: 46px; }
+.ksum .nm { font-weight: 700; font-size: 13.5px; white-space: nowrap; }
+.ksum .wl { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ksum .tail { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; margin-left: auto; }
+.ksum .x { border: 0; background: none; color: var(--faint); font-size: 16px; cursor: pointer; padding: 0 4px; border-radius: 6px; opacity: 0; }
+.krow:hover .x, .krow.open .x { opacity: 1; }
+.ksum .x:hover { color: var(--err); }
+.kedit { display: none; padding: 4px 12px 12px; grid-template-columns: 1fr 1fr; gap: 10px; }
+.krow.open .kedit { display: grid; }
+.kedit .full { grid-column: 1 / -1; }
+.kedit label.f { display: block; font-size: 11.5px; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
+.kedit input, .kedit select { font-size: 13px; padding: 7px 10px; border-radius: 10px; }
+@media (max-width: 600px) { .kedit { grid-template-columns: 1fr; } .ksum .wl { display: none; } }
+.kpick { border-radius: 16px; border: 1px solid var(--edge-soft); background: var(--glass-soft); padding: 12px 14px; margin: 8px 0 12px; max-height: 340px; overflow: auto; }
+.kpick label { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.kempty { color: var(--faint); font-size: 13px; padding: 14px; text-align: center; border: 1px dashed var(--edge-soft); border-radius: 14px; }
 </style>
 </head>
 <body>
@@ -216,29 +220,45 @@ details[open] > summary::before { transform: rotate(90deg); }
 </div>
 
 <div id="tab-knowledge" hidden>
-  <section class="card glass" style="margin-bottom:12px">
-    <div class="row" style="margin-bottom:8px">
-      <h2 class="grow">클러스터 지식 편집</h2>
+  <section class="card glass">
+    <div class="row">
+      <div class="grow">
+        <h1 id="kTitle" style="margin-bottom:8px">클러스터 지식</h1>
+        <div class="chips" id="kStats"></div>
+      </div>
       <span class="faint" id="saveState"></span>
       <button class="btn primary" id="saveShards">저장</button>
     </div>
-    <p class="hint">지식 조각(파편)을 카드 하나씩 입력하세요. 각 카드를 펼쳐 편집하고, 접어서 목록을 봅니다. 오른쪽 아래에 KOA 가 이해한 것이 바로 반영됩니다. <span class="faint">⌘/Ctrl + S 로 저장</span></p>
-    <div id="shardList"></div>
+    <div id="kChecks" style="margin-top:10px"></div>
   </section>
-  <div class="split">
-    <section class="card glass sticky">
-      <div class="row"><h2 class="grow">KOA 가 이해한 것</h2><span class="faint" id="kpath"></span></div>
-      <div id="understood"></div>
+
+  <section class="card glass">
+    <div class="row khdr"><h2 class="grow">흐름</h2><button class="btn" data-n="addFlow">＋ 흐름</button></div>
+    <p class="hint">요청이 지나는 길입니다. 분석은 이 길을 따라 정상에서 비정상으로 바뀌는 첫 지점을 찾습니다. 줄을 누르면 고칩니다. <span class="node unk" style="font-size:11px;padding:0 8px">주황 테두리</span> 는 구성요소에 없는 이름, <span class="node ext" style="font-size:11px;padding:0 8px">점선</span> 은 클러스터 밖.</p>
+    <div id="kFlows" class="klist"></div>
+  </section>
+
+  <div class="split2">
+    <section class="card glass">
+      <div class="row khdr"><h2 class="grow">구성요소</h2>
+        <button class="btn" id="kPickBtn">클러스터에서 고르기 <span class="faint" id="discCount"></span></button>
+        <button class="btn" data-n="addComp">＋ 직접</button></div>
+      <div id="kPick" class="kpick" hidden>
+        <div id="discCands"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="addSel">선택한 것 추가</button>
+          <span class="faint" id="discSel"></span><span class="grow"></span>
+          <button class="btn ghost" id="kPickClose">닫기</button>
+        </div>
+      </div>
+      <p class="hint">질문 속 이름(별명)과 k8s 워크로드를 잇습니다. 줄을 누르면 고칩니다.</p>
+      <div id="kComps" class="klist"></div>
     </section>
     <section class="card glass">
-      <details open id="discDetails"><summary>discover 에서 구성요소 직접 고르기 <span class="faint" id="discCount"></span></summary>
-        <p class="hint" style="margin:4px 0 8px">클러스터에서 발견한 큐·캐시·DB ·Ingress 인스턴스 중 원하는 것을 체크해 구성요소로 추가하세요. 구성요소의 ×(제외)는 다시 여기로 되돌립니다.</p>
-        <div id="discCands" class="disc-list"></div>
-        <div class="row" style="margin-top:10px; gap:8px">
-          <button class="btn primary" id="addSel">선택을 구성요소로 추가</button>
-          <span class="faint" id="discSel"></span>
-        </div>
-      </details>
+      <div class="row khdr"><h2 class="grow">정상 패턴</h2><button class="btn" data-n="addNormal">＋</button></div>
+      <p class="hint">정상인데 이상해 보이는 것. 분석 때 오탐을 거릅니다.</p>
+      <div id="kNormal" class="klist"></div>
+      <p class="faint" style="margin-top:14px" id="kpath"></p>
     </section>
   </div>
 </div>
@@ -262,6 +282,8 @@ details[open] > summary::before { transform: rotate(90deg); }
 
 </main>
 <div id="toast" class="glass"></div>
+<datalist id="compNames"></datalist>
+<datalist id="workloadNames"></datalist>
 
 <script>
 "use strict";
@@ -322,7 +344,7 @@ async function register(name) {
   try {
     await api("clusters", { name, example: $("#regExample").checked });
     S.register = false; toast("만들었습니다. 클러스터를 자유롭게 설명해 주세요", 3000);
-    await loadClusters(name); showTab("knowledge"); const fi = $("#shardList .field input"); if (fi) fi.focus();
+    await loadClusters(name); showTab("knowledge"); $("#kPick").hidden = false;
   } catch (e) { toast(e.message, 4000); }
 }
 async function setCluster(c) {
@@ -413,233 +435,206 @@ async function openResult(c, id) {
   S.poll = setInterval(draw, 3000);
 }
 
-// ---------- 클러스터 지식 (자유 글) ----------
-function understoodHTML(u, notes, check) {
-  const comps = u.components || {}, flows = Object.entries(u.flows || {});
-  const nodeCls = n => { const c = comps[n]; return !c ? "unk" : c.kind === "message-queue" ? "q" : c.external ? "ext" : (!c.workload ? "unk" : ""); };
-  const ROLE = { produce: "넣기", consume: "꺼내기", call: "" };
-  let h = `<div class="sec" style="margin-top:8px"><div class="label">요청 흐름 · 분석 경로</div>`;
-  h += flows.length ? flows.map(([name, f]) => {
-    let html = "", prev = null;
-    f.edges.forEach(e => {
-      if (e.from !== prev) { if (prev !== null) html += '<span class="arrow">·</span>'; html += `<span class="node ${nodeCls(e.from)}">${esc(e.from)}</span>`; }
-      if (e.to) html += `<span class="arrow">→${ROLE[e.role] ? `<small>${ROLE[e.role]}</small>` : ""}</span><span class="node ${nodeCls(e.to)}">${esc(e.to)}</span>`;
-      prev = e.to || e.from;
-    });
-    return `<div class="flow"><div class="chain">${html}</div></div>`;
-  }).join("") : '<p class="faint">아직 없습니다. <code>a → b → c</code> 처럼 한 줄 적어 보세요.</p>';
-  h += "</div>";
-  const names = Object.keys(comps);
-  h += `<div class="sec"><div class="label">구성요소 ${names.length} <span class="faint">(× 는 제외 → discover로)</span></div><div class="grid">` + names.map(n => {
-    const c = comps[n];
-    const where = c.external ? '<span class="chip">클러스터 밖</span>' : c.workload ? `<div class="wl">${esc(c.workload)}</div>` : '<span class="chip warn">워크로드 모름</span>';
-    const al = (c.aliases || []).map(a => `<span class="chip">${esc(a)}</span>`).join("");
-    const fn = (c.flow_nodes || []).map(a => `<span class="chip accent" title="흐름 매칭 이름">${esc(a)}</span>`).join("");
-    const sg = (c.log_signatures || []).map(a => `<span class="chip warn">"${esc(a)}"</span>`).join("");
-    return `<div class="comp"><button class="rm" data-name="${esc(n)}" title="이 구성요소를 제외하고 discover로 되돌리기">×</button><b>${esc(n)}</b> ${c.kind === "message-queue" ? '<span class="chip accent">큐</span>' : ""}<div style="margin-top:4px">${where}</div>${al || fn || sg ? `<div class="chips" style="margin-top:6px">${al}${fn}${sg}</div>` : ""}</div>`;
-  }).join("") + "</div></div>";
-  if ((u.normal || []).length) h += `<div class="sec"><div class="label">정상 패턴</div>` + u.normal.map(x => `<div class="msg">· <b>${esc(x.component)}</b> ${esc(x.note)}</div>`).join("") + "</div>";
-  const msgs = (notes || []).map(m => `<div class="msg warn">${esc(m)}</div>`).concat((check || []).map(c => `<div class="msg ${c.level === "error" ? "err" : "warn"}">${esc(c.msg)}</div>`));
-  h += `<div class="sec"><div class="label">확인할 것</div>${msgs.join("") || '<div class="msg ok">문제 없음</div>'}</div>`;
-  return h;
+// ---------- 클러스터 지식 ----------
+// 상태: SH = { components: {이름: {...}}, flows: [{name, kind, nodes:[]}], normal: [{component, note}] }
+let SH = { components: {}, flows: [], normal: [] };
+const KIND_OPT = { "": "— (알아서)", app: "앱", "message-queue": "큐", cache: "캐시·Redis", database: "DB", ingress: "Ingress", gateway: "게이트웨이" };
+const KIND_LABEL = { "message-queue": "큐", cache: "캐시", database: "DB", ingress: "Ingress", gateway: "게이트웨이", app: "앱" };
+const QRE = /rabbit|rmq|kafka|queue|큐|sqs|nats/i;
+const csvs = v => v.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+
+function flowsToNodes(flows) {
+  return Object.entries(flows || {}).map(([name, f]) => {
+    const uniq = [];
+    (f.edges || []).forEach(e => { if (!uniq.includes(e.from)) uniq.push(e.from); if (e.to && !uniq.includes(e.to)) uniq.push(e.to); });
+    return { name, kind: f.kind || (uniq.some(n => QRE.test(n)) ? "queue" : "http"), nodes: uniq };
+  });
 }
 function renderKnowledge() {
   const k = S.k; if (!k) return;
-  $("#kpath").textContent = k.path;
+  $("#kTitle").textContent = (k.cluster || S.cluster) + " 지식";
+  $("#kpath").textContent = "저장 위치: " + k.path;
   SH = {
-    components: JSON.parse(JSON.stringify((k.understood.components || {}))),
+    components: JSON.parse(JSON.stringify(k.understood.components || {})),
     flows: flowsToNodes(k.understood.flows || {}),
     normal: (k.understood.normal || []).map(x => ({ ...x })),
   };
-  S.dirty = false; $("#saveState").textContent = "";
-  renderShards();
-  renderUnderstood();
+  SH.open = null; S.dirty = false; $("#saveState").textContent = "";
+  renderChecks(k.check || []);
+  renderAll();
   loadCands();
 }
-// ---------- 지식 파편 편집 ----------
-let SH = { components: {}, flows: [], normal: [] };
-function flowsToNodes(flows) {
-  return Object.entries(flows || {}).map(([name, f]) => {
-    const uniq = [], edges = f.edges || [];
-    edges.forEach(e => { if (!uniq.includes(e.from)) uniq.push(e.from); if (e.to && !uniq.includes(e.to)) uniq.push(e.to); });
-    return { name, kind: f.kind || (uniq.some(n => /rabbit|rmq|kafka|queue|큐/i.test(n)) ? "queue" : "http"), nodes: uniq };
-  });
+function renderChecks(list) {
+  S.checks = list;
+  $("#kChecks").innerHTML = list.map(c => `<div class="msg ${c.level === "error" ? "err" : "warn"}">· ${esc(c.msg)}</div>`).join("");
+  $("#kChecks").hidden = true;
+  renderStats();
 }
-const KIND_OPT = { "message-queue": "큐", cache: "캐시·Redis", database: "DB", ingress: "Ingress", gateway: "게이트웨이", app: "앱", "": "— (알아서)" };
-function compSummary(c) {
-  return c.external ? "클러스터 밖" : (c.workload || "워크로드 미지정") + ((c.kind && KIND_OPT[c.kind]) ? " · " + KIND_OPT[c.kind] : "");
+function renderStats() {
+  const nc = Object.keys(SH.components).length, chk = (S.checks || []).length;
+  $("#kStats").innerHTML = `<span class="chip">구성요소 ${nc}</span><span class="chip">흐름 ${SH.flows.length}</span><span class="chip">정상 패턴 ${SH.normal.length}</span>`
+    + (chk ? `<span class="chip warn click" id="kChkChip" title="눌러서 보기">확인할 것 ${chk} ▾</span>` : '<span class="chip ok">문제 없음</span>');
+  const cc = $("#kChkChip"); if (cc) cc.onclick = () => { $("#kChecks").hidden = !$("#kChecks").hidden; };
 }
-function renderShards() {
-  let h = "";
-  h += `<div class="sec"><div class="label">구성요소 (${Object.keys(SH.components).length}) <button class="btn mini" data-n="addComp">＋ 추가</button></div>`;
-  if (!Object.keys(SH.components).length) h += '<p class="msg faint">구성요소가 없습니다. 위에서 discover로 선택하거나 ＋ 추가로 직접 만드세요.</p>';
-  h += Object.entries(SH.components).map(([n, c]) => `
-    <details class="shard" data-comp="${esc(n)}" ${SH.openComp === n ? "open" : ""}>
-      <summary><b>${esc(n)}</b> <span class="faint">${esc(compSummary(c))}</span>
-        <button class="rm2" data-a="delcomp" data-name="${esc(n)}" title="제외(discover로)">×</button></summary>
-      <div class="field"><label>이름</label><input data-f="name" value="${esc(n)}"></div>
-      <div class="field"><label>워크로드  (ns/Kind/이름)</label><input data-f="workload" value="${esc(c.workload || "")}" placeholder="shop/Deployment/order-api"></div>
-      <div class="field"><label>종류</label><select data-f="kind">
-        ${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}
-      </select></div>
-      <div class="field"><label>별명  (쉼표 구분, 질문에서 부르는 말)</label><input data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
-      <div class="field"><label>흐름 매칭 이름 (쉼표 구분, 흐름 경로의 노드 글자)</label><input data-f="flow_nodes" value="${esc((c.flow_nodes || []).join(", "))}"></div>
-      <div class="field"><label>로그 문구 (죽으면 찍히는 것)</label><input data-f="log" value="${esc((c.log_signatures || [])[0] || "")}"></div>
-      <label class="row"><input type="checkbox" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (외부 서비스)</label>
-    </details>`).join("");
-  h += "</div>";
-  h += `<div class="sec"><div class="label">흐름 (${SH.flows.length}) <button class="btn mini" data-n="addFlow">＋ 추가</button></div>`;
-  if (!SH.flows.length) h += '<p class="msg faint">요청이 지나는 경로를 추가하세요 (예: 사용자 → gateway → order-api).</p>';
-  h += SH.flows.map((fl, i) => `
-    <details class="shard" data-flow="${i}" ${SH.openFlow === i ? "open" : ""}>
-      <summary><b>${esc(fl.nodes.join(" → "))}</b> <span class="faint">${fl.kind === "queue" ? "큐" : "http"}</span>
-        <button class="rm2" data-a="delflow" data-i="${i}" title="흐름 삭제">×</button></summary>
-      <div class="field"><label>경로  (→ 로 구분)</label><input data-f="nodes" value="${esc(fl.nodes.join(" → "))}"></div>
-      <label class="row"><input type="checkbox" data-f="kind" ${fl.kind === "queue" ? "checked" : ""}> 큐를 지나는 흐름 (생산·소비)</label>
-    </details>`).join("");
-  h += "</div>";
-  h += `<div class="sec"><div class="label">정상 패턴 (${SH.normal.length}) <button class="btn mini" data-n="addNormal">＋ 추가</button></div>`;
-  if (!SH.normal.length) h += '<p class="msg faint">오탐을 줄이려면 정상 동작을 적으세요.</p>';
-  h += SH.normal.map((x, i) => `
-    <details class="shard" data-normal="${i}" ${SH.openNormal === i ? "open" : ""}>
-      <summary><b>${esc(x.component || "(대상)")}</b> <span class="faint">${esc(x.note || "")}</span>
-        <button class="rm2" data-a="delnormal" data-i="${i}" title="정상패턴 삭제">×</button></summary>
-      <div class="field"><label>대상 구성요소</label><input data-f="component" value="${esc(x.component || "")}"></div>
-      <div class="field"><label>정상 동작</label><input data-f="note" value="${esc(x.note || "")}" placeholder="매일 02:00 배치 때 큐가 쌓였다 빠진다"></div>
-    </details>`).join("");
-  h += "</div>";
-  $("#shardList").innerHTML = h;
-  $("#shardList").querySelectorAll("[data-n=addComp]").forEach(b => b.onclick = () => addComp());
-  $("#shardList").querySelectorAll("[data-n=addFlow]").forEach(b => b.onclick = () => addFlow());
-  $("#shardList").querySelectorAll("[data-n=addNormal]").forEach(b => b.onclick = () => addNormal());
+function renderAll() { renderFlows(); renderComps(); renderNormal(); renderStats(); }
+function known(n) {
+  if (SH.components[n]) return SH.components[n];
+  return Object.values(SH.components).find(c => (c.flow_nodes || []).includes(n) || (c.aliases || []).includes(n)) || null;
 }
-function addComp() {
-  let base = "새-구성요소", i = 1;
-  while (SH.components[base]) base = "새-구성요소-" + (++i);
-  SH.components[base] = { workload: "", kind: "message-queue", aliases: [], flow_nodes: [], log_signatures: [] };
-  SH.openComp = base; dirty(); renderShards();
+function nodeHTML(n) {
+  const c = known(n);
+  const cls = !c ? "unk" : c.kind === "message-queue" ? "q" : c.external ? "ext" : "";
+  return `<span class="node ${cls}" title="${esc(!c ? "구성요소에 없음" : c.external ? "클러스터 밖" : (c.workload || ""))}">${esc(n)}</span>`;
 }
-function addFlow() {
-  SH.flows.push({ name: "flow-" + (SH.flows.length + 1), kind: "http", nodes: ["a", "b"] });
-  SH.openFlow = SH.flows.length - 1; dirty(); renderShards();
+function chainHTML(fl) {
+  const q = fl.kind === "queue";
+  return fl.nodes.map((n, i) => {
+    if (i === 0) return nodeHTML(n);
+    const prev = fl.nodes[i - 1];
+    const role = q ? (QRE.test(n) ? "넣기" : QRE.test(prev) ? "꺼내기" : "") : "";
+    return `<span class="arrow">→${role ? `<small>${role}</small>` : ""}</span>` + nodeHTML(n);
+  }).join("");
 }
-function addNormal() {
-  SH.normal.push({ component: "", note: "" });
-  SH.openNormal = SH.normal.length - 1; dirty(); renderShards();
+const isOpen = id => SH.open === id;
+function rowHTML(id, sum, edit) {
+  return `<div class="krow ${isOpen(id) ? "open" : ""}" data-id="${esc(id)}"><div class="ksum">${sum}<button class="x" data-del="${esc(id)}" title="삭제">×</button></div><div class="kedit">${edit}</div></div>`;
 }
-function dirty() { S.dirty = true; $("#saveState").innerHTML = '<span class="dot"></span>저장 안 됨'; }
-// 파편 편집/삭제 (이벤트 위임)
-$("#shardList").addEventListener("input", e => {
-  const inp = e.target, el = e.target.closest("[data-comp],[data-flow],[data-normal]");
-  if (!el || !inp.dataset.f) return;
-  const f = inp.dataset.f;
-  if (el.dataset.comp !== undefined) {
-    const name = el.dataset.comp, c = SH.components[name];
-    if (f === "name") { const nn = inp.value.trim(); if (nn && !SH.components[nn]) { delete SH.components[name]; SH.components[nn] = c; el.dataset.comp = nn; } }
-    else if (f === "aliases") c.aliases = inp.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-    else if (f === "flow_nodes") c.flow_nodes = inp.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-    else if (f === "log") c.log_signatures = inp.value.trim() ? [inp.value.trim()] : [];
-    else if (f === "external") c.external = inp.checked;
-    else if (f === "kind") c.kind = inp.value || undefined;
-    else c[f] = inp.value;
-  } else if (el.dataset.flow !== undefined) {
-    const fl = SH.flows[+el.dataset.flow];
-    if (f === "nodes") fl.nodes = inp.value.split(/->|→|>/).map(s => s.trim()).filter(Boolean);
-    else if (f === "kind") fl.kind = inp.checked ? "queue" : "http";
-  } else if (el.dataset.normal !== undefined) {
-    const x = SH.normal[+el.dataset.normal];
-    x[f] = f === "component" && inp.value.startsWith("target=") ? inp.value.slice(7) : inp.value;
+function flowSum(fl) { return `<div class="chain grow">${chainHTML(fl)}</div><span class="chip">${fl.kind === "queue" ? "큐" : "http"}</span>`; }
+function renderFlows() {
+  $("#kFlows").innerHTML = SH.flows.map((fl, i) => rowHTML("f" + i, flowSum(fl), `
+      <div class="full"><label class="f">경로 (→ 로 구분)</label><input data-k="f" data-i="${i}" data-f="nodes" value="${esc(fl.nodes.join(" → "))}"></div>
+      <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="f" data-i="${i}" data-f="kind" ${fl.kind === "queue" ? "checked" : ""}> 큐를 지나는 흐름 (넣기·꺼내기)</label>`)).join("")
+    || '<div class="kempty">아직 없습니다. ＋ 흐름으로 "사용자 → gateway → order-api" 처럼 적어 보세요.</div>';
+}
+function compSum(n, c) {
+  const where = c.external ? '<span class="chip">클러스터 밖</span>' : c.workload ? `<span class="wl grow">${esc(c.workload)}</span>` : '<span class="chip warn">워크로드 없음</span>';
+  const tail = (c.aliases || []).slice(0, 3).map(a => `<span class="chip">${esc(a)}</span>`).join("") + ((c.aliases || []).length > 3 ? `<span class="chip">+${c.aliases.length - 3}</span>` : "");
+  return `<span class="nm">${esc(n)}</span>${c.kind && KIND_LABEL[c.kind] ? `<span class="chip accent">${KIND_LABEL[c.kind]}</span>` : ""}${where}<span class="tail">${tail}</span>`;
+}
+function renderComps() {
+  $("#kComps").innerHTML = Object.entries(SH.components).map(([n, c]) => rowHTML("c:" + n, compSum(n, c), `
+      <div><label class="f">이름</label><input data-k="c" data-n="${esc(n)}" data-f="name" value="${esc(n)}"></div>
+      <div><label class="f">종류</label><select data-k="c" data-n="${esc(n)}" data-f="kind">${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="full"><label class="f">워크로드 (네임스페이스/종류/이름)</label><input data-k="c" data-n="${esc(n)}" data-f="workload" list="workloadNames" value="${esc(c.workload || "")}" placeholder="shop/Deployment/order-api"></div>
+      <div><label class="f">별명 (질문에서 부르는 말, 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
+      <div><label class="f">흐름에서 쓰는 이름 (쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="flow_nodes" value="${esc((c.flow_nodes || []).join(", "))}"></div>
+      <div class="full"><label class="f">문제일 때 찍히는 로그 문구</label><input data-k="c" data-n="${esc(n)}" data-f="log" value="${esc((c.log_signatures || []).join(", "))}" placeholder="Too many connections"></div>
+      <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`)).join("")
+    || '<div class="kempty">아직 없습니다. "클러스터에서 고르기" 로 시작하세요.</div>';
+}
+function renderNormal() {
+  $("#kNormal").innerHTML = SH.normal.map((x, i) => rowHTML("n" + i,
+      `<div class="grow" style="font-size:13px"><b>${esc(x.component || "대상?")}</b> <span class="muted">${esc(x.note || "")}</span></div>`, `
+      <div><label class="f">구성요소</label><input data-k="n" data-i="${i}" data-f="component" list="compNames" value="${esc(x.component || "")}"></div>
+      <div><label class="f">정상 동작</label><input data-k="n" data-i="${i}" data-f="note" value="${esc(x.note || "")}" placeholder="매일 02:00 배치 때 큐가 쌓였다 빠진다"></div>`)).join("")
+    || '<div class="kempty">없음</div>';
+  $("#compNames").innerHTML = Object.keys(SH.components).map(n => `<option value="${esc(n)}">`).join("");
+}
+function markDirty() { S.dirty = true; $("#saveState").innerHTML = '<span class="dot"></span>저장 안 됨'; }
+function refreshSum(row) {
+  const id = row.dataset.id, sum = $(".ksum", row), x = sum.querySelector(".x");
+  let html = "";
+  if (id[0] === "f") html = flowSum(SH.flows[+id.slice(1)]);
+  else if (id.startsWith("c:")) html = compSum(id.slice(2), SH.components[id.slice(2)]);
+  else { const n = SH.normal[+id.slice(1)]; html = `<div class="grow" style="font-size:13px"><b>${esc(n.component || "대상?")}</b> <span class="muted">${esc(n.note || "")}</span></div>`; }
+  sum.innerHTML = html; sum.appendChild(x);
+}
+// 줄 열고 닫기 · 삭제
+$("#tab-knowledge").addEventListener("click", e => {
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    e.stopPropagation();
+    const id = del.dataset.del;
+    if (id[0] === "f") SH.flows.splice(+id.slice(1), 1);
+    else if (id.startsWith("c:")) { if (!confirm(`'${id.slice(2)}' 를 지울까요? 클러스터에서 고르기 목록으로 돌아갑니다.`)) return; delete SH.components[id.slice(2)]; }
+    else SH.normal.splice(+id.slice(1), 1);
+    SH.open = null; markDirty(); renderAll(); return;
   }
-  dirty();
-  renderUnderstood();
+  const sum = e.target.closest(".ksum");
+  if (sum) { const id = sum.parentElement.dataset.id; SH.open = SH.open === id ? null : id;
+    $$("#tab-knowledge .krow").forEach(r => r.classList.toggle("open", r.dataset.id === SH.open));
+    const first = SH.open && $(`.krow[data-id="${CSS.escape(SH.open)}"] .kedit input`); if (first) first.focus(); return; }
+  const add = e.target.closest("[data-n]");
+  if (add && add.tagName === "BUTTON") {
+    const a = add.dataset.n;
+    if (a === "addFlow") { SH.flows.push({ name: "flow-" + (SH.flows.length + 1), kind: "http", nodes: [] }); SH.open = "f" + (SH.flows.length - 1); }
+    else if (a === "addComp") { let b = "새-구성요소", i = 1; while (SH.components[b]) b = "새-구성요소-" + (++i); SH.components[b] = {}; SH.open = "c:" + b; }
+    else if (a === "addNormal") { SH.normal.push({ component: "", note: "" }); SH.open = "n" + (SH.normal.length - 1); }
+    markDirty(); renderAll();
+    const first = $(`.krow[data-id="${CSS.escape(SH.open)}"] .kedit input`); if (first) first.focus();
+  }
 });
-$("#shardList").addEventListener("click", e => {
-  const rm = e.target.closest(".rm2"); if (!rm) return;
-  const a = rm.dataset.a;
-  if (a === "delcomp") {
-    const n = rm.dataset.name;
-    if (!confirm(`구성요소 '${n}' 를 지울까요? (discover로 되돌아갑니다)`)) return;
-    delete SH.components[n]; renderShards(); renderUnderstood();
-  } else if (a === "delflow") { SH.flows.splice(+rm.dataset.i, 1); renderShards(); renderUnderstood(); }
-  else if (a === "delnormal") { SH.normal.splice(+rm.dataset.i, 1); renderShards(); renderUnderstood(); }
-  dirty();
+// 편집
+$("#tab-knowledge").addEventListener("input", e => {
+  const t = e.target, k = t.dataset.k, f = t.dataset.f; if (!k || f === "name") return;
+  if (k === "c") {
+    const c = SH.components[t.dataset.n]; if (!c) return;
+    if (f === "aliases" || f === "flow_nodes") c[f] = csvs(t.value);
+    else if (f === "log") c.log_signatures = csvs(t.value);
+    else if (f === "external") c.external = t.checked || undefined;
+    else c[f] = t.value || undefined;
+  } else if (k === "f") {
+    const fl = SH.flows[+t.dataset.i];
+    if (f === "nodes") { fl.nodes = t.value.split(/->|→|=>|>/).map(s => s.trim()).filter(Boolean); if (fl.nodes.some(n => QRE.test(n)) && fl.kind !== "queue") { fl.kind = "queue"; const cb = t.closest(".kedit").querySelector("[data-f=kind]"); if (cb) cb.checked = true; } }
+    else fl.kind = t.checked ? "queue" : "http";
+  } else if (k === "n") SH.normal[+t.dataset.i][f] = t.value;
+  markDirty(); refreshSum(t.closest(".krow")); renderStats();
 });
-function renderUnderstood() {
-  $("#understood").innerHTML = understoodHTML({ components: SH.components, flows: flowsToUnderstood(SH.flows), normal: SH.normal }, [], []);
-}
-function flowsToUnderstood(flows) {
-  // 노드체인 -> 이해한 것 표시용 edges
-  const out = {};
-  flows.forEach((fl, i) => {
-    const nodes = fl.nodes;
-    const edges = [];
-    for (let k = 0; k < nodes.length - 1; k++) {
-      const a = nodes[k], b = nodes[k + 1];
-      const isQ = b && /rabbit|rmq|kafka|queue|큐/i.test(b);
-      edges.push({ from: a, to: b, role: fl.kind === "queue" ? (isQ ? "produce" : "consume") : "call" });
-    }
-    out[fl.name || ("flow-" + (i + 1))] = { kind: fl.kind, edges };
-  });
-  return out;
-}
+// 이름 바꾸기는 칸을 벗어날 때
+$("#tab-knowledge").addEventListener("change", e => {
+  const t = e.target; if (t.dataset.k !== "c" || t.dataset.f !== "name") return;
+  const old = t.dataset.n, nn = t.value.trim();
+  if (!nn || nn === old) { t.value = old; return; }
+  if (SH.components[nn]) { toast("같은 이름이 있습니다"); t.value = old; return; }
+  const out = {}; Object.entries(SH.components).forEach(([n, c]) => out[n === old ? nn : n] = c);
+  SH.components = out;
+  SH.flows.forEach(fl => fl.nodes = fl.nodes.map(x => x === old ? nn : x));
+  SH.normal.forEach(x => { if (x.component === old) x.component = nn; });
+  SH.open = "c:" + nn; markDirty(); renderAll();
+});
 async function saveShards() {
-  const payload = { components: SH.components, flows: SH.flows, normal: SH.normal };
+  SH.flows = SH.flows.filter(fl => fl.nodes.length >= 2);
+  const payload = { components: SH.components, flows: SH.flows, normal: SH.normal.filter(x => x.component && x.note) };
   try {
     const j = await api(kpath() + "/shards", payload);
-    S.dirty = false; $("#saveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
     S.k = await api(kpath()); renderKnowledge();
-    toast("저장했습니다");
-    const errs = (j.check || []).filter(c => c.level === "error").length;
-    if (errs) toast(`${errs}개 확인 필요 — KOA가 이해한 것 보세요`, 4000);
+    $("#saveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
+    toast((S.checks || []).length ? `저장했습니다 · 확인할 것 ${S.checks.length}개` : "저장했습니다", 3000);
+    previewPlan();
   } catch (e) { toast(e.message, 4000); }
 }
 $("#saveShards").onclick = saveShards;
-// 구성요소 제외(×) → flows.yaml에서 빼고 discover 후보로 되돌린다
-$("#understood").addEventListener("click", async e => {
-  const btn = e.target.closest(".rm");
-  if (!btn) return;
-  const name = btn.dataset.name;
-  if (!confirm(`'${name}' 를 구성요소에서 제외할까요?`)) return;
-  try {
-    const j = await api(kpath() + "/delete_components", { names: [name] });
-    toast(`제외됨: ${(j.removed || []).join(", ") || "이미 없음"} → discover 후보로 이동`);
-    S.k = await api(kpath()); renderKnowledge();  // loadCands() 도 다시 불려 후보에 다시 보임
-    previewPlan();
-  } catch (e) { toast(e.message, 4000); }
-});
-// discover 후보: 체크로 구성요소 직접 추가
-const KIND_LABEL = { "message-queue": "큐", cache: "캐시·Redis", ingress: "Ingress", gateway: "게이트웨이", database: "DB", app: "앱" };
-let DISC = []; // 모든 후보 (워크로드 기준 dedupe)
+// 클러스터에서 고르기 (discover 후보)
+let DISC = [];
 async function loadCands() {
   if (!S.cluster) return;
   try {
     const j = await api(kpath() + "/candidates");
     DISC = j.candidates || [];
-    $("#discCount").textContent = `(${DISC.length})`;
+    $("#discCount").textContent = DISC.length ? DISC.length : "";
     const groups = {};
-    DISC.forEach(c => { (groups[c.kind] = groups[c.kind] || []).push(c); });
+    DISC.forEach(c => (groups[c.kind] = groups[c.kind] || []).push(c));
     $("#discCands").innerHTML = Object.entries(groups).map(([kind, list]) =>
-      `<div class="sec"><div class="label">${esc(KIND_LABEL[kind] || kind)} · ${list.length}</div>` +
-      list.slice(0, 200).map(c => `<label class="row disc-item"><input type="checkbox" data-wl="${esc(c.workload)}">
-        <span><b>${esc(c.name)}</b> <span class="faint">${esc(c.workload.replace("/StatefulSet/", " / ").replace("/Deployment/", " / ").replace("/DaemonSet/", " / "))}</span></span></label>`).join("") +
-      `</div>`).join("") || '<div class="msg faint">추가할 후보가 없습니다 (discover 프로필의 큐·캐시·DB·Ingress).</div>';
+      `<div class="label" style="margin-top:6px">${esc(KIND_LABEL[kind] || kind)} · ${list.length}</div>` +
+      list.slice(0, 200).map(c => `<label><input type="checkbox" data-wl="${esc(c.workload)}"><b>${esc(c.name)}</b><span class="faint">${esc(c.workload)}</span></label>`).join("")).join("")
+      || '<div class="faint">추가할 후보가 없습니다. 탐색 결과의 큐·캐시·DB·Ingress·앱이 여기에 나옵니다.</div>';
     refreshDiscSel();
-  } catch (e) { /* 후보 로드 실패는 조용히 */ }
+  } catch (e) { /* 후보를 못 가져오면 버튼만 남긴다 */ }
+  try { const w = await api("workloads/" + encodeURIComponent(S.cluster)); $("#workloadNames").innerHTML = (w.workloads || []).map(x => `<option value="${esc(x)}">`).join(""); } catch (e) {}
 }
-function refreshDiscSel() {
-  const n = $$("#discCands input:checked").length;
-  $("#discSel").textContent = n ? n + " 개 선택됨" : "";
-}
+function refreshDiscSel() { const n = $$("#discCands input:checked").length; $("#discSel").textContent = n ? n + "개 선택" : ""; }
 $("#discCands").addEventListener("change", refreshDiscSel);
+$("#kPickBtn").onclick = () => { $("#kPick").hidden = !$("#kPick").hidden; };
+$("#kPickClose").onclick = () => { $("#kPick").hidden = true; };
 $("#addSel").onclick = async () => {
   const wl = $$("#discCands input:checked").map(x => x.dataset.wl);
-  if (!wl.length) return toast("추가할 구성요소를 체크하세요");
+  if (!wl.length) return toast("추가할 것을 고르세요");
+  if (S.dirty && !confirm("저장하지 않은 변경이 있습니다. 먼저 저장할까요? (취소하면 변경을 버리고 추가)")) { /* 버리고 진행 */ }
+  else if (S.dirty) await saveShards();
   try {
     const j = await api(kpath() + "/add_components", { workloads: wl });
-    toast(`추가됨: ${(j.added || []).join(", ") || "이미 있음"}`);
-    S.k = await api(kpath()); renderKnowledge();
-    const warn = (j.check || []).filter(c => c.level === "error").length;
-    if (warn) toast(`${warn}개 확인 필요 — KOA가 이해한 것 보세요`, 4000);
+    toast(`추가했습니다: ${(j.added || []).join(", ") || "이미 있음"}`);
+    S.k = await api(kpath()); renderKnowledge(); $("#kPick").hidden = true;
   } catch (e) { toast(e.message, 4000); }
 };
 document.addEventListener("keydown", e => {
