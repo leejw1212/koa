@@ -337,12 +337,22 @@ $$("#examples .chip").forEach(c => c.onclick = () => { $("#q").value = c.textCon
 
 function planHTML(p) {
   if (!p) return "";
+  let target = p.target || "";
+  let h = "";
+  if (p.candidates && p.candidates.length) {
+    // 대상이 여러 개로 애매할 때 사용자가 직접 고르는 UI
+    const sel = window._KOA_cand || p.candidates[0];
+    h += `<div class="sec"><div class="label">대상을 직접 선택 (상황마다 다릅니다)</div><div class="chips">` +
+      p.candidates.map(c => `<span class="chip ${c === sel ? "accent" : "click"}" data-t="${esc(c)}">${esc(c)}</span>`).join("") + `</div>
+      <div class="msg faint">선택하면 아래 확인 순서가 그 대상 기준으로 갱신됩니다.</div></div>`;
+    target = sel;
+  }
   const chips = [
-    `<span class="chip accent">대상 · ${esc(p.target || "트리아지로 정함")}</span>`,
+    `<span class="chip accent">대상 · ${esc(p.target || target || "트리아지로 정함")}</span>`,
     `<span class="chip">${esc(SYM[p.symptom] || "증상 미정")}</span>`,
     `<span class="chip">최근 ${esc(p.since)}</span>`,
   ].concat((p.flows || []).map(f => `<span class="chip">흐름 ${esc(f)}</span>`)).join("");
-  let h = `<div class="chips">${chips}</div>`;
+  h += `<div class="chips">${chips}</div>`;
   if (p.path && p.path.length) h += `<div class="sec"><div class="label">확인 순서</div><ol class="steps">` + p.path.map((x, i) =>
     `<li><span class="num">${i + 1}</span><div><span class="name">${esc(x.component)}</span> <span class="wl">${esc(x.workload)}</span><div class="why">${esc(x.why)}</div></div></li>`).join("") + "</ol></div>";
   if (p.known && p.known.length) h += `<div class="sec"><div class="label">비슷한 과거 이슈 · 먼저 확인</div>` + p.known.map(k =>
@@ -355,17 +365,19 @@ const previewPlan = debounce(async () => {
   const q = $("#q").value.trim(), box = $("#planPreview");
   if (!q) { box.className = "empty"; box.textContent = "질문을 쓰면 여기에 나옵니다."; return; }
   if (!S.k) { box.className = "empty"; box.textContent = "이 클러스터에는 지식이 없어 트리아지만으로 봅니다."; return; }
-  try { const j = await api("plan", { cluster: S.cluster, question: q, since: $("#since").value }); box.className = ""; box.innerHTML = planHTML(j.plan); }
+  try { const j = await api("plan", { cluster: S.cluster, question: q, since: $("#since").value, target: window._KOA_cand || "" }); box.className = ""; box.innerHTML = planHTML(j.plan);
+    $$("#planPreview .chip[data-t]").forEach(c => c.onclick = () => { window._KOA_cand = c.dataset.t; previewPlan(); });
+  }
   catch (e) { box.textContent = e.message; }
 }, 250);
-$("#q").addEventListener("input", previewPlan);
+$("#q").addEventListener("input", () => { window._KOA_cand = null; previewPlan(); });
 $("#since").addEventListener("input", previewPlan);
 $("#submit").onclick = async () => {
   const q = $("#q").value.trim();
   if (!q) return toast("질문을 써 주세요");
   if (!S.cluster) return toast("먼저 클러스터를 정하세요");
   try {
-    const j = await api("requests", { cluster: S.cluster, question: q, since: $("#since").value, triage: $("#runTriage").checked, source: $("#source").value });
+    const j = await api("requests", { cluster: S.cluster, question: q, since: $("#since").value, triage: $("#runTriage").checked, source: $("#source").value, target: window._KOA_cand || "" });
     $("#q").value = ""; previewPlan(); showTab("results"); openResult(S.cluster, j.id);
   } catch (e) { toast(e.message, 4000); }
 };
@@ -422,8 +434,9 @@ function understoodHTML(u, notes, check) {
     const c = comps[n];
     const where = c.external ? '<span class="chip">클러스터 밖</span>' : c.workload ? `<div class="wl">${esc(c.workload)}</div>` : '<span class="chip warn">워크로드 모름</span>';
     const al = (c.aliases || []).map(a => `<span class="chip">${esc(a)}</span>`).join("");
+    const fn = (c.flow_nodes || []).map(a => `<span class="chip accent" title="흐름 매칭 이름">${esc(a)}</span>`).join("");
     const sg = (c.log_signatures || []).map(a => `<span class="chip warn">"${esc(a)}"</span>`).join("");
-    return `<div class="comp"><button class="rm" data-name="${esc(n)}" title="이 구성요소를 제외하고 discover로 되돌리기">×</button><b>${esc(n)}</b> ${c.kind === "message-queue" ? '<span class="chip accent">큐</span>' : ""}<div style="margin-top:4px">${where}</div>${al || sg ? `<div class="chips" style="margin-top:6px">${al}${sg}</div>` : ""}</div>`;
+    return `<div class="comp"><button class="rm" data-name="${esc(n)}" title="이 구성요소를 제외하고 discover로 되돌리기">×</button><b>${esc(n)}</b> ${c.kind === "message-queue" ? '<span class="chip accent">큐</span>' : ""}<div style="margin-top:4px">${where}</div>${al || fn || sg ? `<div class="chips" style="margin-top:6px">${al}${fn}${sg}</div>` : ""}</div>`;
   }).join("") + "</div></div>";
   if ((u.normal || []).length) h += `<div class="sec"><div class="label">정상 패턴</div>` + u.normal.map(x => `<div class="msg">· <b>${esc(x.component)}</b> ${esc(x.note)}</div>`).join("") + "</div>";
   const msgs = (notes || []).map(m => `<div class="msg warn">${esc(m)}</div>`).concat((check || []).map(c => `<div class="msg ${c.level === "error" ? "err" : "warn"}">${esc(c.msg)}</div>`));
@@ -469,7 +482,8 @@ function renderShards() {
       <div class="field"><label>종류</label><select data-f="kind">
         ${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}
       </select></div>
-      <div class="field"><label>별명  (쉼표 구분)</label><input data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
+      <div class="field"><label>별명  (쉼표 구분, 질문에서 부르는 말)</label><input data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
+      <div class="field"><label>흐름 매칭 이름 (쉼표 구분, 흐름 경로의 노드 글자)</label><input data-f="flow_nodes" value="${esc((c.flow_nodes || []).join(", "))}"></div>
       <div class="field"><label>로그 문구 (죽으면 찍히는 것)</label><input data-f="log" value="${esc((c.log_signatures || [])[0] || "")}"></div>
       <label class="row"><input type="checkbox" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (외부 서비스)</label>
     </details>`).join("");
@@ -502,7 +516,7 @@ function renderShards() {
 function addComp() {
   let base = "새-구성요소", i = 1;
   while (SH.components[base]) base = "새-구성요소-" + (++i);
-  SH.components[base] = { workload: "", kind: "message-queue", aliases: [], log_signatures: [] };
+  SH.components[base] = { workload: "", kind: "message-queue", aliases: [], flow_nodes: [], log_signatures: [] };
   SH.openComp = base; dirty(); renderShards();
 }
 function addFlow() {
@@ -523,6 +537,7 @@ $("#shardList").addEventListener("input", e => {
     const name = el.dataset.comp, c = SH.components[name];
     if (f === "name") { const nn = inp.value.trim(); if (nn && !SH.components[nn]) { delete SH.components[name]; SH.components[nn] = c; el.dataset.comp = nn; } }
     else if (f === "aliases") c.aliases = inp.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    else if (f === "flow_nodes") c.flow_nodes = inp.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
     else if (f === "log") c.log_signatures = inp.value.trim() ? [inp.value.trim()] : [];
     else if (f === "external") c.external = inp.checked;
     else if (f === "kind") c.kind = inp.value || undefined;

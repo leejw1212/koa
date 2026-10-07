@@ -222,9 +222,9 @@ def save_shards(cluster, sdata):
         if not n:
             continue
         comp = {}
-        for k in ("workload", "kind", "tier", "aliases", "external", "log_signatures"):
+        for k in ("workload", "kind", "tier", "aliases", "flow_nodes", "external", "log_signatures"):
             if c.get(k) is not None and c.get(k) != "" and c.get(k) != []:
-                if k in ("aliases", "log_signatures") and not isinstance(c.get(k), list):
+                if k in ("aliases", "flow_nodes", "log_signatures") and not isinstance(c.get(k), list):
                     continue
                 comp[k] = c[k]
         if comp:
@@ -394,6 +394,35 @@ def flow_nodes(flow):
     return seen
 
 
+def node_to_comps(node, comps):
+    """흐름 노드가 가리키는 구성요소 이름 목록.
+
+    매칭은 구성요소 이름 + aliases + flow_nodes(흐름 매칭 전용) 를 상대로 한다.
+    규칙: 흐름 노드가 그 이름과 같거나, 한쪽이 다른 쪽을 부분 문자열로 포함하면 매칭.
+    예: 노드 'OpenAPI G/W or Console Wrapper' 는 flow_nodes 에 'Console Wrapper' 를
+    둔 admin/manager/user-console-wrapper 를 모두 가리킨다.
+    """
+    if not node:
+        return []
+    nl = str(node).lower()
+    hits = []
+    for name, c in (comps or {}).items():
+        names = [name] + list((c or {}).get("aliases") or []) + list((c or {}).get("flow_nodes") or [])
+        for a in names:
+            al = str(a).lower().strip()
+            if not al:
+                continue
+            if nl == al or (len(al) >= 3 and (al in nl or nl in al)):
+                hits.append(name)
+                break
+    return hits
+
+
+def flow_has_target(flow, target, comps):
+    """구성요소 target 이 흐름의 어떤 노드를 대표하는가 (노드 → 구성요소 매칭)."""
+    return any(target in node_to_comps(n, comps) for n in flow_nodes(flow))
+
+
 def parse_front(text):
     """'---\\n<yaml>\\n---\\n본문' → (dict, 본문)."""
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.S)
@@ -453,7 +482,7 @@ def check(cluster, data=None):
             out.append(("warn", "흐름 %s: hop 이 없다" % fname))
         for e in es:
             for n in (e["from"], e["to"]):
-                if n and n not in comps:
+                if n and not node_to_comps(n, comps):
                     out.append(("warn", "흐름 %s: '%s' 가 구성요소에 없다 (경로에는 나오지만 워크로드를 모른다)" % (fname, n)))
             if e["role"] not in ROLES:
                 out.append(("error", "흐름 %s: role '%s' 는 produce | consume | call 중 하나" % (fname, e["role"])))
@@ -471,15 +500,29 @@ def check(cluster, data=None):
 
 # ---------- 조사 계획 ----------
 
-def find_target(question, comps):
+def find_targets(question, comps):
+    """질문에서 매칭된 구성요소 후보 목록. 최고 매칭 길이 기준으로 동점인 것들을 모두 반환.
+    이름 + aliases + flow_nodes 를 모두 상대로 하되, 여러 구성요소가 같은 흐름 이름
+    (예: Console Wrapper) 을 공유하면 모두 후보로 남겨 사용자가 직접 고르게 한다."""
     q = question.lower()
-    best, best_len = None, 0
-    for name, c in comps.items():
-        for a in [name] + list((c or {}).get("aliases") or []):
+    best_len, by_len = 0, set()
+    for name, c in (comps or {}).items():
+        for a in [name] + list((c or {}).get("aliases") or []) + list((c or {}).get("flow_nodes") or []):
             a = str(a).lower().strip()
-            if a and a in q and len(a) > best_len:
-                best, best_len = name, len(a)
-    return best
+            if a and a in q:
+                L = len(a)
+                if L > best_len:
+                    best_len, by_len = L, {name}
+                elif L == best_len:
+                    by_len.add(name)
+                break  # 이 구성요소는 가장 긴 매칭 이름 하나로만 평가
+    return sorted(by_len)
+
+
+def find_target(question, comps):
+    """질문에서 유일하게 대상이 가려지면 그 이름, 애매하면(동점 후보 여럿) None."""
+    ts = find_targets(question, comps)
+    return ts[0] if len(ts) == 1 else None
 
 
 def find_symptom(question):
@@ -502,7 +545,7 @@ def order_path(target, symptom, data):
     """대상을 지나는 흐름에서 확인 순서대로 [(구성요소, 역할 설명)]."""
     comps = data.get("components") or {}
     flows = data.get("flows") or {}
-    hit = {n: f for n, f in flows.items() if target in flow_nodes(f)}
+    hit = {n: f for n, f in flows.items() if flow_has_target(f, target, comps)}
     path = []
 
     def add(name, why):
@@ -555,14 +598,17 @@ def namespaces_for(names, comps):
     return out
 
 
-def plan(cluster, question, since=None, data=None, incidents=None):
+def plan(cluster, question, since=None, data=None, incidents=None, force_target=None):
     data = data if data is not None else load_flows(cluster)
     incidents = incidents if incidents is not None else load_incidents(cluster)
     comps = data.get("components") or {}
-    target = find_target(question, comps)
+    target = force_target if force_target else find_target(question, comps)
+    cands = find_targets(question, comps) if not target else []
     symptom = find_symptom(question)
     notes = []
-    if not target:
+    if cands:
+        notes.append("질문이 구성요소 여러 개와 매칭됨 → 조사 시 대상을 직접 선택한다 (%s)" % ", ".join(cands))
+    elif not target:
         notes.append("질문에서 구성요소를 못 찾았다 → 트리아지 상위 이상 징후를 대상으로 본다 (구성요소 aliases 에 질문 속 단어를 넣으면 다음부터 찾는다)")
     if not symptom:
         notes.append("증상 유형을 못 정했다 → 트리아지 결과로 정한다")
@@ -587,6 +633,7 @@ def plan(cluster, question, since=None, data=None, incidents=None):
         "request": question,
         "cluster": cluster,
         "target": target,
+        "candidates": cands,
         "symptom": symptom,
         "since": since or find_since(question) or "1h",
         "flows": flows_hit,

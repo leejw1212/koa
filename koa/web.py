@@ -261,7 +261,7 @@ def create_request(body):
     if not q:
         raise ValueError("질문이 비었다")
     has_k = K.cluster_dir(c).is_dir()
-    plan = K.plan(c, q, (body.get("since") or "").strip() or None) if has_k else {
+    plan = K.plan(c, q, (body.get("since") or "").strip() or None, force_target=(body.get("target") or "").strip() or None) if has_k else {
         "request": q, "cluster": c, "target": None, "symptom": K.find_symptom(q), "since": (body.get("since") or "").strip() or K.find_since(q) or "1h",
         "flows": [], "path": [], "namespaces": [], "known": [], "normal": [], "notes": ["클러스터 지식이 없다 → 트리아지만으로 본다"],
         "created": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
@@ -397,7 +397,7 @@ class Handler(BaseHTTPRequestHandler):
                 q = (body.get("question") or "").strip()
                 if not q or not K.cluster_dir(c).is_dir():
                     return self._send(200, {"plan": None})
-                pl = K.plan(c, q, (body.get("since") or "").strip() or None)
+                pl = K.plan(c, q, (body.get("since") or "").strip() or None, force_target=(body.get("target") or "").strip() or None)
                 return self._send(200, {"plan": pl, "text": K.plan_text(pl)})
             if p == ["requests"]:
                 if method == "GET":
