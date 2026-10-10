@@ -5,6 +5,8 @@
   python3 koa/knowledge.py init <클러스터> [--example]        # local/knowledge/<클러스터>/ 만들기 (탐색한 큐·캐시·ingress 를 미리 채움)
   python3 koa/knowledge.py check <클러스터>                   # flows.yaml 의 빈 곳·틀린 곳
   python3 koa/knowledge.py plan <클러스터> "rmq 소비가 안 돼"   # 질문 → 조사 계획 (yaml)
+  python3 koa/knowledge.py merge <클러스터> cand.json [--pick 1,3] [--apply]
+                                                            # koa/flowmap.py 후보를 기존 지식에 더한다 (기본: 미리 보기)
 
 웹 화면(koa/web.py)도 이 모듈을 그대로 쓴다. 클러스터는 건드리지 않는다 (파일만 읽고 쓴다).
 """
@@ -215,6 +217,7 @@ def save_shards(cluster, sdata):
     flows 의 nodes 는 노드 체인(문자열 목록)으로 받아 hops 로 변환해 저장한다.
     반환: {"components":.., "flows":.., "normal":.., "check":[(level,msg),...]} (저장된 flows.yaml dict)."""
     d = cluster_dir(cluster)
+    d.mkdir(parents=True, exist_ok=True)  # 지식 폴더가 아직 없는 클러스터 (flowmap 후보를 처음 더할 때)
     f = d / "flows.yaml"
     comps = {}
     for n, c in (sdata.get("components") or {}).items():
@@ -267,6 +270,75 @@ def save_shards(cluster, sdata):
     a.write_text("# 클러스터 지식 (파편 편집)\n\n%s%s%s" % (comp_lines, flow_lines, norm_lines))
     return {"components": comps, "flows": flows, "normal": normal,
             "check": [(lv, m) for lv, m in check(cluster, data)]}
+
+
+def merge_candidates(cluster, cand, pick=None, apply=False):
+    """koa/flowmap.py 후보(파편 형식)를 기존 지식에 더한다. 기존 구성요소·흐름·정상 패턴은 지우거나 고치지 않는다.
+    같은 workload 의 구성요소는 기존 이름으로 바꿔 쓰고, 기존 흐름과 같거나 그 일부인 흐름은 건너뛴다.
+    pick: 더할 후보 흐름 번호(1부터) 목록. apply=False 면 미리 보기만.
+    반환: {"components": [더한 이름], "flows": [(이름, 노드)], "skipped": [(이름, 이유)], "check": [...], "saved": bool}"""
+    data = load_flows(cluster)
+    comps = {n: dict(c or {}) for n, c in (data.get("components") or {}).items()}
+    by_wl = {c.get("workload"): n for n, c in comps.items() if c.get("workload")}
+    rename, added_c = {}, []
+    cand_flows = list(cand.get("flows") or [])
+    wanted = set(pick) if pick else set(range(1, len(cand_flows) + 1))
+    used = {x for i, f in enumerate(cand_flows, 1) if i in wanted for x in f.get("nodes") or []}
+    for n, c in (cand.get("components") or {}).items():
+        c = dict(c or {})
+        if n not in used:
+            continue
+        w = c.get("workload")
+        if w and w in by_wl:
+            rename[n] = by_wl[w]
+            continue
+        if not w:
+            hit = node_to_comps(n, comps)
+            if hit:
+                rename[n] = hit[0]
+                continue
+        name, i = n, 2
+        while name in comps:
+            name, i = "%s-%d" % (n, i), i + 1
+        comps[name] = c
+        rename[n] = name
+        added_c.append(name)
+
+    def canon(chain):
+        return tuple((node_to_comps(x, comps) or [x])[0] for x in chain)
+
+    def inside(short, long_):
+        return any(long_[i:i + len(short)] == short for i in range(len(long_) - len(short) + 1))
+
+    old = [canon(_flow_nodes(f)) for f in (data.get("flows") or {}).values()]
+    flows = [{"name": n, "kind": f.get("kind"), "nodes": _flow_nodes(f)} for n, f in (data.get("flows") or {}).items()]
+    names = {f["name"] for f in flows}
+    added_f, skipped = [], []
+    for i, f in enumerate(cand_flows, 1):
+        if i not in wanted:
+            continue
+        nodes = [rename.get(x, x) for x in f.get("nodes") or []]
+        c = canon(nodes)
+        if any(inside(c, o) for o in old):
+            skipped.append((f.get("name"), "기존 흐름에 이미 있다"))
+            continue
+        name, j = f.get("name") or " → ".join(nodes), 2
+        while name in names:
+            name, j = "%s (%d)" % (f.get("name"), j), j + 1
+        names.add(name)
+        old.append(c)
+        flows.append({"name": name, "kind": f.get("kind"), "nodes": nodes})
+        added_f.append((name, nodes))
+    sdata = {"components": comps, "flows": flows, "normal": data.get("normal") or []}
+    out = {"components": added_c, "flows": added_f, "skipped": skipped, "saved": False}
+    if apply and (added_c or added_f):
+        saved = save_shards(cluster, sdata)
+        out.update(check=saved["check"], saved=True)
+    else:
+        tmp = {"schema": "koa.knowledge/v1", "cluster": cluster, "components": comps, "normal": sdata["normal"],
+               "flows": {f["name"]: {"kind": f.get("kind") or "http", "hops": f["nodes"]} for f in flows}}
+        out["check"] = check(cluster, tmp)
+    return out
 
 
 def _comp_prose(c, name):
@@ -677,6 +749,11 @@ def main():
     pp.add_argument("question")
     pp.add_argument("--since", default=None)
     pp.add_argument("--yaml", action="store_true", help="계획을 yaml 로")
+    mp = sub.add_parser("merge", help="koa/flowmap.py --shards 후보를 기존 지식에 더한다 (지우거나 고치지 않음)")
+    mp.add_argument("cluster")
+    mp.add_argument("candidates", help="koa/flowmap.py --shards 로 쓴 JSON")
+    mp.add_argument("--pick", default=None, help="더할 후보 흐름 번호 (쉼표, 기본 전부)")
+    mp.add_argument("--apply", action="store_true", help="실제로 저장 (없으면 미리 보기)")
     a = ap.parse_args()
     try:
         if a.cmd == "list":
@@ -693,6 +770,23 @@ def main():
         elif a.cmd == "plan":
             p = plan(a.cluster, a.question, a.since)
             print(yaml.safe_dump(p, allow_unicode=True, sort_keys=False) if a.yaml else plan_text(p))
+        elif a.cmd == "merge":
+            import json
+            cand = json.loads(Path(a.candidates).read_text())
+            pick = [int(x) for x in a.pick.split(",") if x.strip()] if a.pick else None
+            r = merge_candidates(a.cluster, cand, pick, a.apply)
+            print("더할 구성요소 %d: %s" % (len(r["components"]), ", ".join(r["components"]) or "-"))
+            print("더할 흐름 %d:" % len(r["flows"]))
+            for n, nodes in r["flows"]:
+                print("  + %s: %s" % (n, " → ".join(nodes)))
+            for n, why in r["skipped"]:
+                print("  = %s: %s" % (n, why))
+            for lv, msg in r.get("check") or []:
+                print("%s %s" % ("❌" if lv == "error" else "⚠", msg))
+            if r["saved"]:
+                print("저장했다: %s (이전 것은 flows.yaml.bak)" % (cluster_dir(a.cluster) / "flows.yaml"))
+            elif r["flows"] or r["components"]:
+                print("미리 보기다. 저장하려면 --apply")
         else:
             ap.print_help()
     except ValueError as x:

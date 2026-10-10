@@ -307,8 +307,8 @@ def discover(kube, catalog, do_probe):
                     "pods": 0, "ready": 0, "services": [], "access": list(route_hosts.get((ns, svc), [])),
                 })
                 inst["pods"] += 1
-                ready = any(cs.get("ready") for cs in pod.get("status", {}).get("containerStatuses", []))
-                inst["ready"] += 1 if ready else 0
+                pod_ready = any(cs.get("ready") for cs in pod.get("status", {}).get("containerStatuses", []))
+                inst["ready"] += 1 if pod_ready else 0
         for (ns, wl), inst in app_inst.items():
             inst["access"] = sorted(set(inst["access"])) or None
             instances[("app-workload", ns, wl)] = inst

@@ -389,6 +389,27 @@ argoproj-labs `argocd-mcp` 대신 쓸 서버를 찾았다. 조건: 하위 경로
 - opensearch `SearchIndexTool` 인자는 `query_dsl`. `*` 전체 검색은 `@timestamp` 없는 시스템 인덱스에서 샤드 실패 → `index=` 필수.
 - `query.py` 는 Hermes 와 같은 `include` 를 지킨다: `--call grafana grafana_api_request` → 거부.
 
+## 16. 흐름 찾기 · 통신 확인 원칙 · 탐색 버그 (2026-10-10)
+
+사용자 결정
+- **통신 확인은 허용한다.** 헬스·상태 경로 GET 같은 도달 확인(`discover.py --probe`, MCP probe 조회)은 묻지 않고 해도 된다.
+- **앱이 일을 하게 만드는 요청**(데이터 생성, 표식 요청, 부하)은 여전히 먼저 묻는다.
+- 요청 경로는 클러스터마다 손으로 조사하지 않고 공통 도구로 찾는다. 코드에 클러스터 이름·로컬 경로를 넣지 않는다.
+
+추가한 것
+- `koa/flowmap.py`: 요청이 지나는 길 후보를 설정(Ingress·Route·env·args·ConfigMap·NetworkPolicy)과 파드 로그만으로 찾는다. 방법과 판정은 `docs/koa-flowmap.md`.
+- `knowledge.py merge`: 후보를 기존 지식에 더한다. 기본은 미리 보기이고, 사람이 쓴 내용은 고치거나 지우지 않는다.
+- `koa/tests/`: 클러스터 없이 도는 규칙 검사.
+
+kind-lab 결과 (MCP, 약 10초)
+- 클러스터에 보낸 요청: 목록 조회 9 · 객체 조회 27 · 로그 읽기 51
+- 흐름 후보 11개. 손으로 조사해 저장해 둔 흐름 5개는 모두 다시 찾았다(merge 에서 "기존 흐름에 이미 있다").
+- 새 후보 6개를 지식에 더했다: 운영 화면 입구 4개(argocd·opensearch·grafana·prometheus), opensearch-dashboards → opensearch, argocd application-controller → repo-server(NetworkPolicy 허용 + repo-server 로그의 파드 IP 648줄).
+- 새 구성요소에 부르는 말(aliases)을 붙여 "그라파나 접속이 안 돼" 같은 질문이 대상을 찾는다.
+
+고친 버그
+- `discover.py`: app-workload 감지 루프가 노드 Ready 개수 변수(`ready`)를 덮어써서 보고서에 "노드 1/3 Ready" 로 나왔다(실제 3/3). 파드 쪽 변수를 `pod_ready` 로 바꿨다.
+
 ## 13. 다음 단계
 
 1. candidate 를 하나씩 verified 로 올린다 (argocd 부터).

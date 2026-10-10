@@ -41,7 +41,8 @@ Run the whole flow without asking. MCP registration is automatic: whatever disco
      `k8s/hermes-readonly.yaml` + `k8s/make-readonly-kubeconfig.sh <admin-context>`
      (writes `~/.kube/hermes-readonly.yaml`). KOA does not run this itself.
    - `delete pods` or `list secrets` = yes → the account is not read-only; stop and report.
-2. **Discover.** `python3 koa/discover.py --probe` (≈2 s; read-only API calls, GETs on health paths only).
+2. **Discover.** `python3 koa/discover.py --probe` (≈2 s; read-only API calls + one GET per discovered
+   health path — reachability checks are allowed by the user; nothing that makes an app do work).
    It writes the cluster profile + report and prints the report. It refuses `~/.kube/config`.
 3. **Report in chat** (required, never just "ran it"):
    1. Components table (kind, location, outside URL + probe, Prometheus scraped?).
@@ -94,6 +95,24 @@ not in ad-hoc chat text.
   API: `POST /api/plan` body 에 `target` 을 넣으면(force_target) 그대로 고정.
 - 구성요소 편집 폼에 '흐름 매칭 이름' 필드가 있어 flow_nodes 를 쉼표 구분으로 입력/저장한다(save_shards 가 보존).
 
+## Building cluster knowledge (flows) — any cluster, config + logs only
+
+When the user asks for the request flow ("요청이 지나는 길 만들어줘"), use the tool, not ad-hoc scripts:
+1. `python3 koa/flowmap.py --shards "$HERMES_HOME/cache/scratch/<c>-flows.json"` (`--ns a,b` to narrow,
+   `--source kubectl` before MCP registration). It only does get/list and pod-log reads — no requests to apps,
+   no connection tests, no DNS, no exec/port-forward, no Secret reads; its first line prints the call counts.
+   Method and verdict rules: `docs/koa-flowmap.md`.
+2. Show the user the flow table + evidence table + "확인 못 한 것" (verdict per hop: 설정+로그 / 설정 / 로그 /
+   허용규칙+로그 / 요청ID / 허용규칙). Queue produce/consume direction is inferred — say so.
+3. `python3 koa/knowledge.py merge <c> <file>` previews; add only what the user picks with `--pick 1,3 --apply`.
+   Merge never edits or deletes human-written components/flows/normal notes; it backs up `flows.yaml.bak`.
+4. Deeper confirmation of an inferred hop (shared store, old traffic) goes through the log-store MCP
+   (OpenSearch/Loki) — still reads only. Normal patterns (`normal`) remain a human/analysis step.
+- Never hard-code a cluster's names, namespaces or local paths into code. If flowmap misses a hop, fix the
+  general rule in `koa/flowmap.py` + add a case to `koa/tests/test_flowmap.py` (synthetic data).
+- A node shared via `flow_nodes` (one node standing for several components) shows workload `?` in `plan`
+  path lines; namespaces still come from the real components.
+
 ## Promoting candidate → verified (catalog maintenance, dev checkout)
 
 1. Get read-only creds. Real clusters: from the user. kind-lab: `python3 lab/kind-lab-tokens.py`
@@ -119,6 +138,14 @@ not in ad-hoc chat text.
 - mcp-grafana `--disable-write` still exposes 62 tools incl. `alerting_manage_routing` and
   `grafana_api_request`; keep the curated `include` list.
 - macOS system python is 3.9 — keep KOA scripts free of 3.10+ syntax.
+- Starting `koa/web.py` from a Hermes background terminal: `python3` there can resolve to Hermes' bundled
+  Python (no PyYAML) → `ModuleNotFoundError: yaml`. Launch with `/usr/bin/python3 koa/web.py` and export
+  `KUBECONFIG=~/.kube/hermes-readonly.yaml` (web.py runs triage with `sys.executable`).
+- flowmap: without a discovery profile, kinds come from catalog image rules; run `discover.py` first for better
+  ingress/log-shipper detection. MCP `kubectl_get` errors come back as a JSON blob — use `errtext()` to show them.
+- `koa/query.py --call` cuts output at 6000 chars (`--max`); pass `--max 0` before parsing JSON. Read
+  `IndexMappingTool` before `terms` aggs: when the index template maps strings to `keyword` there is no
+  `.keyword` subfield and the agg silently returns empty buckets.
 - Never run the `hermes` CLI (incl. `plan.py --apply`) with `HERMES_HOME` outside `~/.hermes`: it
   re-mints `~/.hermes/hermes-agent/.hermes/bin/hermes` against that folder's Python and every `hermes`
   command breaks. `paths.hermes_env()` refuses; test with a throwaway profile under

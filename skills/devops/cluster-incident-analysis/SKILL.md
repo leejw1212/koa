@@ -32,9 +32,11 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
 - **Analyze only through the read-only path**: the kubernetes/opensearch MCP tools, or terminal
   `kubectl` with `~/.kube/hermes-readonly.yaml` (same SA as the MCP). Never `~/.kube/config` (admin).
   The point is to exercise the system being built, so admin shortcuts invalidate the exercise.
-- **No writes to the diagnosed system without asking** — including test traffic (`curl` to an app
-  or ingress with a marker request id). It is a write and changes the evidence. If a hypothesis can
-  only be confirmed by a probe, say so and ask, or ask the user to send it.
+- **Reachability checks are allowed; no writes or test traffic without asking.** A GET on a
+  health/readiness path or a backend's status endpoint (what `discover.py --probe` and MCP probes do)
+  is fine. Requests that make the app do work (`curl` with a marker request id, POSTs, load) are writes
+  and change the evidence — if a hypothesis can only be confirmed that way, say so and ask, or ask the
+  user to send it.
 - **Filter before it enters context.** `kubectl_logs` returns raw lines (a single web pod's healthz
   spam floods the context). Always pass `since`/`tail`; prefer terminal kubectl with `grep -v`,
   `wc -l`, `jsonpath` when you need counts or exclusions.

@@ -14,6 +14,8 @@ python3 koa/query.py prometheus firing                     #    이름 붙인 �
 python3 koa/query.py kubernetes logs name=<pod> ns=<ns> tail=50
 python3 koa/query.py --probe         #    서버마다 조회 1개 → 표
 python3 koa/triage.py                # 5) 장애 분석 첫 단계: k8s MCP 로 전체를 훑어 이상 징후 요약 (--since 3h, --at <UTC>, --ns a,b)
+python3 koa/flowmap.py --shards c.json   # 6) 요청이 지나는 길 후보: 설정·로그만 읽는다 (요청·접속 시험 없음)
+python3 koa/knowledge.py merge <이름> c.json [--pick 1,3] [--apply]   #    고른 후보를 클러스터 지식에 더한다
 python3 koa/readonly.py [MCP...]     # (단독) 백엔드 계정이 읽기 전용인지
 python3 koa/check_mcp.py [MCP...]    # (단독) 실제 도구 목록과 include 비교
 python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
@@ -37,7 +39,9 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `plan.py` | 프로필 + 카탈로그 → 설치 계획. `--apply` 는 `hermes config set mcp_servers.<이름>` 으로 등록 |
 | `query.py` | 카탈로그 `queries`(이름 붙인 조회)·`probe` 를 MCP 로 실행. `--call` 로 허용 목록 안 도구 직접 호출 |
 | `triage.py` | 장애 분석 첫 단계. kubernetes MCP(`kubectl_get` yaml)로 노드·파드·이벤트·워크로드·엔드포인트·변경을 한 번에 모아 점수순 이상 징후 + 변경 타임라인 + 다음 조회를 낸다. 결과 JSON 은 `<결과>/<이름>.triage/` |
-| `knowledge.py` | 클러스터 지식(`local/knowledge/<클러스터>/`) 읽기·검사, 질문 → 조사 계획 (`plan <클러스터> "rmq 소비가 안 돼"`). 설계: `docs/koa-analysis-inputs.md` |
+| `knowledge.py` | 클러스터 지식(`local/knowledge/<클러스터>/`) 읽기·검사, 질문 → 조사 계획 (`plan <클러스터> "rmq 소비가 안 돼"`), flowmap 후보 합치기(`merge`). 설계: `docs/koa-analysis-inputs.md` |
+| `flowmap.py` | 요청 경로 후보. 입구(Ingress·Route) + 워크로드 설정(env·args·ConfigMap)에 적힌 주소 + 파드 로그(다른 파드 IP·Service 주소·요청 ID)로 연결을 찾고 근거·판정을 붙인다. 클러스터에는 get/list/logs 만. 결과 JSON 은 `<결과>/<이름>.flowmap/`. `docs/koa-flowmap.md` |
+| `tests/` | 클러스터 없이 도는 규칙 검사 (`python3 koa/tests/test_flowmap.py` 등) |
 | `web.py`, `web/index.html` | 로컬 웹 화면 (127.0.0.1:8765): 지식 편집 · 조사 요청 · 결과 보기. 표준 라이브러리 + PyYAML 만. `docs/koa-web.md` |
 | `readonly.py` | MCP 계정이 읽기 전용인지 백엔드 권한 질의로 확인 (쓰기 시도 없음). ok / warn / fail / skip |
 | `mcp_client.py` | MCP 서버를 Hermes 와 같은 방식(stdio)으로 띄우는 최소 클라이언트. 허용 목록 밖 도구는 거부 |
