@@ -21,7 +21,7 @@
 ③ 결론 + 제안        원인 지점, 근거 표, 못 본 것  +  "새로 알게 된 것" 표 → 사용자 OK → knowledge.py add / incident
    │
    ▼
-④ 에이전트 성장      클러스터와 무관한 분석 요령 → 스킬 cluster-incident-analysis,  사용자·환경 사실 → 메모리
+④ 에이전트 성장      클러스터와 무관한 분석 요령 → 스킬 koa-learned,  사용자·환경 사실 → 메모리  (웹 "KOA 가 배운 것" 탭)
 ```
 
 ## 1. 무엇을 어디에 쌓나
@@ -32,7 +32,7 @@
 | 과거 이슈 1건 = 파일 1개 | `local/knowledge/<클러스터>/incidents/*.md` | 사용자 OK 후 KOA (`knowledge.py incident`), 웹 화면 |
 | 아직 확인 안 된 제안 | `local/knowledge/<클러스터>/suggestions.yaml` | flowmap, KOA (`knowledge.py suggest`) → 웹에서 더하기/버리기 |
 | 자유 메모 | `local/knowledge/<클러스터>/architecture.md` | 사용자 |
-| 분석 요령 (어느 클러스터에나 통하는 것) | 스킬 `cluster-incident-analysis` 의 Pitfalls | KOA (알려 주고 바로) |
+| 분석 요령 (어느 클러스터에나 통하는 것) | 스킬 `koa-learned` (프로필에만 있고 저장소에 없어서 업데이트가 덮지 않는다) | KOA (알려 주고 바로) |
 | 사용자·환경에 대한 짧은 사실 | Hermes 메모리 | KOA |
 
 클러스터 이름·흐름은 메모리나 스킬에 넣지 않는다. 메모리는 매 턴 들어가고 크기 제한이 있어서, 클러스터 지식은 파일에 두고 필요할 때 그 부분만 꺼낸다.
@@ -116,6 +116,7 @@ cd ~/.hermes/profiles/koa && /usr/bin/python3 koa/web.py     # → http://127.0.
 |---|---|
 | 클러스터 지식 | 맨 위에 **제안** 카드(무엇이 바뀌는지 미리 보기 + 더하기/버리기). 흐름(노드 칩, 순서 편집), 구성요소(별명·로그 문구·워크로드, "클러스터에서 고르기"는 읽기 전용 kubectl 로 워크로드 목록), 정상 패턴 |
 | 과거 이슈 | 한 문단으로 쓰면 날짜·구성요소·로그 문구·원인을 뽑아 미리 보여 주고 저장. 저장한 이슈는 다음 `context` 에 바로 나온다 |
+| KOA 가 배운 것 | 이 프로필(`koa`)의 Hermes 메모리(항목 지우기 가능)와, KOA 가 만들거나 고친 스킬(`koa-learned` + curator 기록·`created_by: agent` 인 것, 본문·변경 기록 보기). 꺼 둔 기본 스킬은 안 보인다. `koa/learned.py` |
 
 POST 는 `X-KOA: 1` 헤더가 있어야 받는다 (다른 사이트에서 보낸 요청 막기). 클러스터 이름·이슈 파일 이름은 정규식으로 검사한다.
 

@@ -75,8 +75,10 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `refe
    Rows the user declines but that may matter later → `knowledge.py suggest <c> '<json>' --title "…" --why "…"`
    only if they say "나중에". Use `--dry-run` first when unsure what `add` will change.
 8. **Self-improvement** (no OK needed, tell the user in one line): a cluster-independent analysis lesson →
-   patch the Pitfalls of this skill (in the dev checkout `~/hermes-config/skills/...` if it exists, so it
-   survives profile updates); a stable user/environment fact → memory. Never put cluster names/flows there.
+   one line under "## Lessons" of the `koa-learned` skill (skill_manage patch; `python3 koa/learned.py init` if
+   it is missing). Don't patch this skill for that: it is shipped and a profile update overwrites it. A stable
+   user/environment fact → memory. Never put cluster names/flows there. Both show in the web UI tab
+   "KOA 가 배운 것". Lessons that proved general can later be promoted into this skill in the repo.
 
 ## Flow discovery on request
 

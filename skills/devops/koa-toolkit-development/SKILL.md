@@ -134,6 +134,18 @@ unasked.
   print only rows whose output changed. Include questions that must NOT change (other flows) as a guard.
   Keep the harness in scratch; show the user the before/after table.
 
+## Learned skill and memory (`koa/learned.py`)
+
+- KOA's own lessons go to the `koa-learned` skill, which is **not in the repo**: `hermes profile update`
+  replaces only the files the distribution ships (per-file merge), so a profile-only skill survives while
+  edits to shipped skills (`cluster-incident-analysis`, ...) are overwritten. Never add `koa-learned` to the
+  repo; to keep a lesson for every install, promote it into the shipped skill in the checkout.
+- "Skills KOA made or changed" = `koa-learned` ∪ skills in `skills/.curator_ledger.jsonl` ∪ `.usage.json`
+  records with `created_by: agent`. Bundled skills (in `.bundled_manifest`) never show unless edited.
+- Memory files use Hermes' format (`\n§\n` between entries) and lock (`<file>.lock` + flock, write temp +
+  `os.replace`). Delete by exact entry text so a concurrent change makes the delete fail instead of removing
+  the wrong entry. Memory changes reach the agent only in a new chat (system prompt is frozen per session).
+
 ## Knowledge rules (`knowledge.py context` / `add`) — pitfalls
 
 - Name → component matching is substring-based (aliases, `flow_nodes`). A node that equals a component

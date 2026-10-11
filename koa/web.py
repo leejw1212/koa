@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """KOA 웹 화면 — 클러스터 지식(구성요소·흐름·정상 패턴·제안)과 과거 이슈를 보고 고친다.
+KOA 가 배운 것(이 프로필의 메모리, KOA 가 만들거나 고친 스킬)도 보여 준다 (learned.py).
 
   python3 koa/web.py                 # http://127.0.0.1:8765
   python3 koa/web.py --port 9000
@@ -24,6 +25,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import knowledge as K  # noqa: E402
+import learned as L  # noqa: E402
 from paths import REPO  # noqa: E402
 
 HTML = Path(__file__).resolve().parent / "web" / "index.html"
@@ -205,6 +207,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if method == "GET" and len(p) == 2 and p[0] == "workloads":
                 return self._send(200, workloads(p[1]))
+            if method == "GET" and p == ["learned"]:
+                return self._send(200, L.summary())
+            if method == "POST" and p == ["learned", "memory", "delete"]:
+                with _lock:
+                    left = L.delete_memory(body.get("target") or "", body.get("text") or "")
+                return self._send(200, {"left": len(left)})
             if p[:1] == ["knowledge"] and len(p) >= 2:
                 c = p[1]
                 if method == "GET" and len(p) == 2:
