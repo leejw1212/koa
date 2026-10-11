@@ -84,6 +84,10 @@ def _np_site_blocked():
     }
 
 
+def _redis(*cmd):
+    return kubectl("-n", "linkcard", "exec", "redis-0", "--", "redis-cli", *cmd)
+
+
 SCENARIOS = {
     "callback-blocked": {
         "symptom": "링크카드에서 '만들기'를 누르면 접수는 되는데 '결과를 기다리는 중…'에서 끝나지 않아요. 원인 찾아줘.",
@@ -118,6 +122,23 @@ SCENARIOS = {
         "recover": lambda: kubectl("-n", "linkcard", "delete", "networkpolicy", "slowsite-allow-ingress",
                                    "--ignore-not-found"),
         "check": lambda: "slowsite-allow-ingress" in kubectl("-n", "linkcard", "get", "networkpolicy", "-o", "name"),
+    },
+    # 어려운 것: k8s 객체 변경 없음(실행 중 설정만), 파드·이벤트 정상, 증상 로그(job.report_failed)가
+    # 콜백 차단 과거 이슈와 같다 → 지식이 오답(NetworkPolicy)으로 끌 수 있다.
+    "redis-oom": {
+        "symptom": "링크카드에서 카드 만들기를 누르면 바로 오류가 나고, 가끔 접수돼도 결과가 안 나와요. 원인 찾아줘.",
+        "answer": {
+            "cause": "redis 의 maxmemory 가 실행 중 2mb 로 낮아졌고(정책 noeviction) 이미 그 이상을 쓰고 있어 쓰기가 전부 거부됨 "
+                     "(OOM command not allowed when used memory > 'maxmemory'). web 의 POST /api/cards 와 "
+                     "/internal/result 가 redis 에 쓰다 500.",
+            "where": "web 로그 redis.exceptions.OutOfMemoryError, status 500; worker 로그 job.report_failed HTTP Error 500 "
+                     "(timeout 아님); NetworkPolicy 없음; redis 파드 정상·재시작 없음. 설정 변경은 k8s 에 흔적이 없다",
+            "fix": "redis maxmemory 원복 (또는 재시작) — 운영자 조치",
+        },
+        "keywords": [["redis", "레디스"], ["maxmemory", "outofmemory", "oom", "메모리"]],
+        "inject": lambda: _redis("CONFIG", "SET", "maxmemory", "2mb"),
+        "recover": lambda: _redis("CONFIG", "SET", "maxmemory", "0"),
+        "check": lambda: _redis("CONFIG", "GET", "maxmemory").split()[-1] != "0",
     },
 }
 

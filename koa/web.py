@@ -94,6 +94,12 @@ def save_incident(c, body):
     if not FILE_RE.match(name):
         raise ValueError("파일 이름 형식 오류: %s" % name)
     with _lock:
+        if body.get("file") and (d / name).is_file():
+            # 고치기: 글에서 다시 뽑지 못하는 칸(찾은 방법, 재발 기록)과 글에서 못 찾은 칸은 기존 값을 둔다
+            old, _ = K.parse_front((d / name).read_text())
+            for k, v in old.items():
+                if k in ("found_by", "recurrences") or k not in meta:
+                    meta[k] = v
         (d / name).write_text(K.incident_text(meta, text))
     return name
 

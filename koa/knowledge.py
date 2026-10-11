@@ -366,9 +366,16 @@ def additions_text(r):
     return "\n".join(L) or "(더할 것 없음 — 이미 있다)"
 
 
-def slug(text):
-    s = re.sub(r"[^0-9A-Za-z가-힣]+", "-", text or "").strip("-").lower()
-    return s[:40] or "incident"
+def slug(text, limit=40):
+    """파일 이름용. 단어(-) 경계에서 자른다 — 'ingress-nginx' 가 'ing' 로 잘리지 않게."""
+    words = [w for w in re.sub(r"[^0-9A-Za-z가-힣]+", "-", text or "").lower().split("-") if w]
+    out = ""
+    for w in words:
+        nxt = (out + "-" + w) if out else w
+        if len(nxt) > limit:
+            break
+        out = nxt
+    return out or (words[0][:limit] if words else "incident")
 
 
 def incident_text(meta, body):
@@ -424,6 +431,31 @@ def write_incident(cluster, inc):
         f, i = d / ("%s-%s-%d.md" % (date, slug(inc.get("cause") or ""), i)), i + 1
     f.write_text(incident_text(meta, inc.get("body") or ""))
     return f
+
+
+INC_NAME_RE = re.compile(r"^[0-9A-Za-z가-힣._-]{1,120}\.md$")
+
+
+def recur_incident(cluster, name, rec):
+    """같은 원인이 다시 났을 때: 새 이슈 대신 기존 이슈의 머리말 recurrences 에 한 줄 더한다.
+    rec: {date, note, logs?}. 새 로그 문구는 signature.logs 에 합친다. 같은 날짜·같은 메모는 다시 넣지 않는다."""
+    if not INC_NAME_RE.match(name or ""):
+        raise ValueError("이슈 파일 이름 형식이 아니다")
+    f = cluster_dir(cluster) / "incidents" / name
+    if not f.is_file():
+        raise LookupError("과거 이슈 %s 가 없다" % name)
+    meta, body = parse_front(f.read_text())
+    item = {"date": str(rec.get("date") or dt.date.today().isoformat()), "note": str(rec.get("note") or "").strip()}
+    recs = [r for r in (meta.get("recurrences") or []) if isinstance(r, dict)]
+    if any(str(r.get("date")) == item["date"] and (r.get("note") or "") == item["note"] for r in recs):
+        return f, False
+    meta["recurrences"] = recs + [item]
+    logs = incident_logs(meta)
+    new = [x for x in (rec.get("logs") or []) if x and x not in logs]
+    if new:
+        meta["signature"] = {"logs": logs + new}
+    f.write_text(incident_text(meta, body))
+    return f, True
 
 
 # ---------- 제안 (flowmap 이나 분석이 찾은 것, 사용자가 고르면 더한다) ----------
@@ -636,7 +668,8 @@ def context(cluster, question, names=None, data=None, incidents=None):
         sig = incident_logs(m)
         if set(ic) & set(picked_c) or len(set(ic) & set(scope)) >= 2 or any(s.lower() in q for s in sig):
             known.append({"file": inc["file"], "date": str(m.get("date") or ""), "cause": m.get("cause") or "",
-                          "components": ic, "logs": sig})
+                          "components": ic, "logs": sig,
+                          "recurrences": len([r for r in (m.get("recurrences") or []) if isinstance(r, dict)])})
     normal = [n for n in data.get("normal") or [] if isinstance(n, dict) and n.get("component") in scope]
     if not picked_c and not picked_f:
         notes.append("질문에서 지식 속 구성요소·흐름을 못 찾았다 → 어느 구성요소/흐름인지 사용자에게 묻는다 "
@@ -660,8 +693,9 @@ def context_text(p):
             extra = ("  로그: %s" % ", ".join('"%s"' % s for s in c["log_signatures"])) if c.get("log_signatures") else ""
             L.append("  %s%-18s %s%s" % ("* " if n in p["asked"] else "  ", n, where, extra))
     for k in p["incidents"]:
-        L.append("과거 이슈 %s %s — %s%s" % (k["date"], k["file"], k["cause"],
-                                          (" (로그: %s)" % ", ".join(k["logs"])) if k["logs"] else ""))
+        L.append("과거 이슈 %s %s — %s%s%s" % (k["date"], k["file"], k["cause"],
+                                            (" (로그: %s)" % ", ".join(k["logs"])) if k["logs"] else "",
+                                            (" [재발 %d회]" % k["recurrences"]) if k.get("recurrences") else ""))
     for n in p["normal"]:
         L.append("정상 패턴 %s: %s" % (n.get("component"), n.get("note")))
     for n in p["notes"]:
@@ -704,6 +738,10 @@ def main():
     ip = sub.add_parser("incident")
     ip.add_argument("cluster")
     ip.add_argument("json")
+    rp = sub.add_parser("recur", help="같은 원인 재발: 기존 이슈에 한 줄 더한다")
+    rp.add_argument("cluster")
+    rp.add_argument("file", help="incidents/ 안의 파일 이름 (context 출력의 이름)")
+    rp.add_argument("json", help='{"date": "...", "note": "...", "logs": [...]}')
     sub.add_parser("suggestions").add_argument("cluster")
     for name in ("accept", "dismiss"):
         p = sub.add_parser(name)
@@ -733,6 +771,9 @@ def main():
             print("저장했다 (이전 것은 flows.yaml.bak)" if r["saved"] else "미리 보기다 (저장 안 함)" if a.dry_run else "")
         elif a.cmd == "incident":
             print("기록했다: %s" % write_incident(a.cluster, _json_arg(a.json)))
+        elif a.cmd == "recur":
+            f, added = recur_incident(a.cluster, a.file, _json_arg(a.json))
+            print(("재발을 더했다: %s" if added else "이미 기록된 재발이다: %s") % f)
         elif a.cmd == "suggest":
             sid = add_suggestion(a.cluster, a.title, _json_arg(a.json), a.source, a.why)
             print("제안 %s 를 남겼다" % sid if sid else "남기지 않았다 (이미 지식에 있거나, 같은 제안이 있거나, 전에 버린 것)")

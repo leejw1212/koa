@@ -653,7 +653,7 @@ function renderIncidents() {
   const k = S.k; if (!k) return;
   $("#incList").innerHTML = k.incidents.map((i, n) => `<div class="item" data-n="${n}"><div class="grow">
       <div style="font-weight:600">${esc(i.meta.cause || i.file)}</div>
-      <div class="chips" style="margin-top:4px"><span class="chip">${esc(String(i.meta.date || "").slice(0, 10))}</span>${(i.meta.components || []).map(x => `<span class="chip">${esc(x)}</span>`).join("")}</div></div></div>`).join("")
+      <div class="chips" style="margin-top:4px"><span class="chip">${esc(String(i.meta.date || "").slice(0, 10))}</span>${(i.meta.recurrences || []).length ? `<span class="chip warn" title="${esc((i.meta.recurrences || []).map(r => r.date + " " + (r.note || "")).join("\n"))}">재발 ${(i.meta.recurrences || []).length}회</span>` : ""}${(i.meta.components || []).map(x => `<span class="chip">${esc(x)}</span>`).join("")}</div></div></div>`).join("")
     || '<div class="empty">아직 없습니다.</div>';
   $$("#incList .item").forEach(el => el.onclick = () => editInc(k.incidents[+el.dataset.n], el));
   $("#incForm").hidden = true;

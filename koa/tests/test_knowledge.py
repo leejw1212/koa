@@ -164,6 +164,27 @@ class Store(unittest.TestCase):
         self.assertEqual(f.name, "2026-10-11-커넥션-고갈.md")
         self.assertEqual(K.incident_logs(m), ["too many"])
 
+    def test_slug_cuts_on_word_boundary(self):
+        n = K.slug("NetworkPolicy slowsite-allow-ingress (ingress-nginx 네임스페이스만 허용) 가 막음")
+        self.assertEqual(n, "networkpolicy-slowsite-allow-ingress")
+        self.assertTrue(len(K.slug("a" * 80)) <= 40)
+        self.assertEqual(K.slug(""), "incident")
+
+    def test_recur_appends_once(self):
+        f = K.write_incident("c1", {"date": "2026-10-01", "components": ["db"], "logs": ["too many"], "cause": "커넥션 고갈"})
+        _, added = K.recur_incident("c1", f.name, {"date": "2026-10-11", "note": "배치 겹침", "logs": ["too many", "pool exhausted"]})
+        self.assertTrue(added)
+        _, again = K.recur_incident("c1", f.name, {"date": "2026-10-11", "note": "배치 겹침"})
+        self.assertFalse(again)
+        m = K.load_incidents("c1")[0]["meta"]
+        self.assertEqual(m["recurrences"], [{"date": "2026-10-11", "note": "배치 겹침"}])
+        self.assertEqual(K.incident_logs(m), ["too many", "pool exhausted"])
+        self.assertEqual(len(K.load_incidents("c1")), 1)  # 새 파일을 만들지 않는다
+        with self.assertRaises(ValueError):
+            K.recur_incident("c1", "../x.md", {})
+        with self.assertRaises(LookupError):
+            K.recur_incident("c1", "none.md", {})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

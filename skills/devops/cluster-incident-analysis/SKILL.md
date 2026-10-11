@@ -71,6 +71,9 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `refe
                                      "normal": [{"component": "linkcard-worker", "note": "…"}]}'
    python3 koa/knowledge.py incident <c> '{"date": "2026-10-11", "components": ["rabbitmq"], "logs": ["…"], "cause": "…", "found_by": "…", "body": "한 문단"}'
    ```
+   **Same cause as a past incident in the slice → don't propose a new incident.** Propose "재발" instead and,
+   after OK, append it to that file: `python3 koa/knowledge.py recur <c> <incident-file> '{"date": "…", "note":
+   "한 줄", "logs": ["새로 본 문구"]}'`. A new incident is only for a cause not already recorded.
    `add` only adds (merges list fields, fills empty fields, skips flows already known); show its output.
    Rows the user declines but that may matter later → `knowledge.py suggest <c> '<json>' --title "…" --why "…"`
    only if they say "나중에". Use `--dry-run` first when unsure what `add` will change.

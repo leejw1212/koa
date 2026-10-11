@@ -92,20 +92,19 @@ KOA ships as a Hermes profile distribution. Two copies exist:
 | `python3 koa/query.py --probe` | every registered MCP ✅ |
 | the new tool, run once from the installed copy | same result as from the checkout |
 
-Then tell the user: a running `koa/web.py` still serves the old code until restarted; SOUL/skill
-changes apply from a new chat (restart the desktop app). Offer the web restart rather than doing it
-unasked.
+Then restart the web (`launchctl kickstart -k gui/$(id -u)/ai.koa.web`, below) so it serves the new code;
+SOUL/skill changes apply from a new chat.
 
-## Restarting `koa/web.py` (user asks "웹 재시작해")
+## Restarting `koa/web.py` (user asks "웹 재시작해", or after a profile update)
 
-1. `pgrep -fl koa/web.py`; read its cwd (`lsof -a -p <pid> -d cwd -Fn`), args and `HERMES_HOME`
-   (`ps -E -o command= -p <pid>`) so the new process uses the same profile, port and bind address.
-2. `kill <pid>` (TERM), wait until `kill -0` fails.
-3. Start it again from the profile dir as a background process with `persist_on_release=true` (a server
-   the user wants to outlive the chat): `HERMES_HOME=<profile> python3 -u koa/web.py --port <port>`.
-4. Verify with read-only calls: `GET /` → 200; `GET /api/knowledge/<c>` → counts, `check == []` and
-   `suggestions`. (All POSTs need header `X-KOA: 1` and write knowledge — don't use them to verify.)
-5. Tell the user to refresh the browser tab.
+On this Mac the web runs as a LaunchAgent `ai.koa.web` (`~/Library/LaunchAgents/ai.koa.web.plist`, KeepAlive,
+log `$HERMES_HOME/logs/koa-web.log`). Don't start it as a Hermes background process: those are killed when the
+agent's process cleanup runs (that is how 8765 died once) — and don't `pkill` it either, launchd restarts it.
+1. `launchctl kickstart -k gui/$(id -u)/ai.koa.web` (restart with the new code).
+2. Verify with read-only calls: `GET /` → 200; `GET /api/knowledge/<c>` → counts, `check == []`; `GET /api/learned`.
+   (All POSTs need header `X-KOA: 1` and write knowledge — don't use them to verify.)
+3. Tell the user to refresh the browser tab.
+On a machine without the LaunchAgent: copy that plist (paths adjusted) and `launchctl bootstrap gui/$(id -u) <plist>`.
 
 ## Testing technique
 

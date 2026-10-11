@@ -92,6 +92,7 @@ python3 koa/knowledge.py context <c> "rmq 소비가 안 돼"        # ① 이 �
 python3 koa/knowledge.py context <c> --with rabbitmq,order-worker   # 사용자가 이름을 짚어 줬을 때
 python3 koa/knowledge.py add <c> '<json>' [--dry-run]           # ③ OK 받은 것만 더한다
 python3 koa/knowledge.py incident <c> '<json>'                  # 과거 이슈 1건
+python3 koa/knowledge.py recur <c> <이슈파일> '{"date":…,"note":…}'  # 같은 원인 재발: 기존 이슈에 한 줄 (새 파일 안 만듦)
 python3 koa/knowledge.py suggest <c> '<json>' --title … --why …  # 나중에 고를 제안
 python3 koa/knowledge.py suggestions <c> | accept <c> <id> | dismiss <c> <id>
 python3 koa/knowledge.py check <c>                              # 워크로드·흐름 매칭 검사
