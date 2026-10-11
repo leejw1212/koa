@@ -65,6 +65,17 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
    (don't re-run unless it failed or is stale). Follow the steps below along that path, then write the final
    report (cause point, evidence table, what could not be verified) to `report.md` in that folder — the web UI
    shows it — and give the same summary in chat. Cluster knowledge itself: `local/knowledge/<cluster>/`.
+0b. **Request in chat (no request.yaml)**: if `local/knowledge/<cluster>/flows.yaml` exists, build the same plan
+   first: `python3 koa/knowledge.py plan <cluster> "<사용자 질문 그대로>" [--since 3h]`. Show its first lines
+   (target · symptom · since · flows, check order) at the top of your first reply so the user can correct the
+   reading. Then work in this order: `known` past incidents first (grep their log signatures) → walk `path`
+   in order → judge each hop against `normal` before calling it abnormal (a matching normal pattern = not
+   the cause; say so). If the plan has `candidates` or no target, run triage first and take the top anomaly
+   on the path; mention the miss so the user can add aliases. Without knowledge, skip to step 1.
+   In the report, name every place where the knowledge didn't match the cluster (missing workload,
+   flow that doesn't exist) — wrong knowledge means a wrong path.
+   After the user confirms a cause, offer a draft `incidents/<date>-<slug>.md` (date, symptom, components,
+   signature.logs, cause, found_by + one paragraph); write it only after they OK it.
 1. **Read the cluster profile first** (`$HERMES_HOME/local/clusters/<name>.yaml`, or `clusters/` in a
    dev checkout). If missing or stale, run discovery (`koa-cluster-discovery`). It tells you which tools exist, log index/fields, pipeline
    shape, and known gaps — so you don't re-derive structure from configmaps every time.

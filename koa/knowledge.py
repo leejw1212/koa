@@ -476,6 +476,10 @@ def node_to_comps(node, comps):
     """
     if not node:
         return []
+    # 노드가 구성요소 이름 그대로면 그 하나만: 'shop-worker' 가 alias 'shop' 의 shop-api 로
+    # 부분 문자열 매칭되어 새지 않게
+    if node in (comps or {}):
+        return [node]
     nl = str(node).lower()
     hits = []
     for name, c in (comps or {}).items():
@@ -620,9 +624,34 @@ def order_path(target, symptom, data):
     hit = {n: f for n, f in flows.items() if flow_has_target(f, target, comps)}
     path = []
 
+    def resolve(node):
+        """흐름 노드 → 구성요소 이름들 (못 찾으면 노드 이름 그대로)."""
+        if not node:
+            return []
+        return node_to_comps(node, comps) or [node]
+
     def add(name, why):
-        if name and name not in [p[0] for p in path]:
-            path.append((name, why))
+        # 흐름 노드 이름(예: '대상 사이트')은 그 노드를 대표하는 구성요소들로 바꿔 넣는다
+        for n in resolve(name):
+            if n and n not in [p[0] for p in path]:
+                path.append((n, why))
+
+    def target_nodes(f):
+        """흐름 f 에서 target 을 가리키는 노드 이름들."""
+        return [n for n in flow_nodes(f) if target in resolve(n)]
+
+    def downstream(f):
+        """흐름 f 안에서 target 노드 이후로 이어지는 노드들 (가까운 순). 흐름을 넘나들지 않는다."""
+        start = target_nodes(f)
+        out, frontier = [], list(start)
+        while frontier:
+            nxt = []
+            for e in edges(f):
+                if e["from"] in frontier and e["to"] and e["to"] not in out and e["to"] not in start:
+                    out.append(e["to"])
+                    nxt.append(e["to"])
+            frontier = nxt
+        return out
 
     if symptom == "queue-backlog":
         for f in hit.values():
@@ -643,9 +672,15 @@ def order_path(target, symptom, data):
         # 대상 자체가 먼저, 그다음 대상이 부르는 하류 (의존성이 죽어서 죽는 경우), 나머지
         add(target, "대상 — 상태·재시작·이벤트")
         for f in hit.values():
+            tn = target_nodes(f)
             for e in edges(f):
-                if e["from"] == target and e["to"]:
+                if e["from"] in tn and e["to"]:
                     add(e["to"], "대상의 하류 — 의존성 실패로 죽는지")
+        # 그 너머 흐름 하류: 요청 단위 증상("카드 생성이 안 돼")은 대상 파드가 멀쩡해도
+        # 흐름 끝(소비자·외부 호출)에서 실패할 수 있다
+        for f in hit.values():
+            for n in downstream(f):
+                add(n, "흐름 하류 — 요청이 여기서 실패하는지")
     else:
         for fname, f in hit.items():
             for n in flow_nodes(f):
