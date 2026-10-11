@@ -57,6 +57,32 @@ class LearnedTest(unittest.TestCase):
         self.assertTrue(f.is_file())
         self.assertIn("name: koa-learned", f.read_text())
 
+    def test_summarize_caches_and_goes_stale(self):
+        import subprocess as sp
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return sp.CompletedProcess(cmd, 0, "분석 요령 모음.\n\n## 언제 쓰나\n- 분석할 때\nsession_id: x\n", "")
+        L.paths.REPO = self.h  # 요약 저장 위치를 임시 폴더로
+        old = L.subprocess.run
+        L.subprocess.run = fake_run
+        try:
+            d = L.summarize("edited")
+        finally:
+            L.subprocess.run = old
+        self.assertEqual(d["oneline"], "분석 요령 모음.")
+        self.assertNotIn("session_id", d["text"])
+        self.assertIn("todo", calls[0])  # 도구는 todo 하나만
+        k = [s for s in L.skills() if s["name"] == "edited"][0]
+        self.assertFalse(k["ko"]["stale"])
+        f = self.h / "skills" / "devops" / "edited" / "SKILL.md"
+        f.write_text(f.read_text() + "\nnew lesson\n")
+        k = [s for s in L.skills() if s["name"] == "edited"][0]
+        self.assertTrue(k["ko"]["stale"])
+        with self.assertRaises(LookupError):
+            L.summarize("apple-notes")  # KOA 가 만든·고친 스킬이 아니면 거부
+
 
 if __name__ == "__main__":
     unittest.main()

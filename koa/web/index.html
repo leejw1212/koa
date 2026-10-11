@@ -150,6 +150,10 @@ details[open] > summary::before { transform: rotate(90deg); }
 .ksum .x { border: 0; background: none; color: var(--faint); font-size: 16px; cursor: pointer; padding: 0 4px; border-radius: 6px; opacity: 0; }
 .krow:hover .x, .krow.open .x { opacity: 1; }
 .kbody { padding: 0 12px 12px; }
+.kosum { font-size: 13.5px; line-height: 1.65; padding: 10px 14px; border-radius: 12px; background: var(--glass-soft); border: 1px solid var(--edge-soft); }
+.kosum h4 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); } .kosum h4:first-child { margin-top: 0; }
+.kosum ul { margin: 0; padding-left: 18px; } .kosum p { margin: 4px 0; }
+.kosum code { font-family: var(--mono); font-size: 12px; }
 .ksum .x:hover { color: var(--err); }
 .kedit { display: none; padding: 4px 12px 12px; grid-template-columns: 1fr 1fr; gap: 10px; }
 .krow.open .kedit { display: grid; }
@@ -266,7 +270,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   </section>
   <section class="card glass">
     <h2>스킬</h2>
-    <p class="hint">KOA 가 쓰면서 만들거나 고친 스킬입니다. <b>koa-learned</b> 는 분석하며 배운 요령(도구 쓰는 법, 함정)을 쌓는 곳이라 프로필 업데이트에도 남습니다. 보기만 합니다 — 고칠 것은 KOA 채팅에 말하세요.</p>
+    <p class="hint">KOA 가 쓰면서 만들거나 고친 스킬입니다. <b>koa-learned</b> 는 분석하며 배운 요령(도구 쓰는 법, 함정)을 쌓는 곳이라 프로필 업데이트에도 남습니다. 원문은 영어라 줄을 펼치면 한국어 요약을 보여 줍니다 (처음 한 번 만들고, 스킬이 바뀌면 다시 만듭니다). 보기만 합니다 — 고칠 것은 KOA 채팅에 말하세요.</p>
     <div id="lSkills" class="klist"></div>
     <p class="faint" style="margin-top:14px" id="lHome"></p>
   </section>
@@ -405,13 +409,21 @@ async function loadLearned() {
   }).join("");
   $("#lSkills").innerHTML = L.skills.length ? L.skills.map((k, i) => `<div class="krow"><div class="ksum" data-ls="${i}">
       <span class="nm">${esc(k.name)}</span>${k.learned ? '<span class="chip accent">배운 요령</span>' : ""}
-      <span class="grow faint" style="white-space:normal">${esc(k.description)}</span>
+      <span class="grow faint" style="white-space:normal">${esc(k.ko && k.ko.oneline || k.description)}</span>
       <span class="chip">변경 ${k.change_count}</span><span class="chip">사용 ${k.use_count}</span>
       <span class="faint">${esc(fmtTs(k.modified))}</span></div>
     <div class="kbody" hidden data-lb="${i}">
       ${k.changes.length ? '<div class="faint" style="margin:8px 0">' + k.changes.slice().reverse().map(c => esc(fmtTs(c.ts) + " " + c.action + " (" + c.actor + ")")).join("<br>") + "</div>" : ""}
-      <pre style="padding:10px 12px;max-height:480px;overflow:auto">${esc(k.body)}</pre></div></div>`).join("")
+      <div class="row" style="margin:6px 0 8px;gap:8px">
+        <span class="label" style="margin:0">한국어 요약</span>
+        ${k.ko ? `<span class="faint">${esc(fmtTs(k.ko.created))} 기준${k.ko.stale ? ' · <b style="color:var(--warn)">스킬이 바뀌어 오래됨</b>' : ""}</span>` : '<span class="faint">아직 없음</span>'}
+        <span class="grow"></span>
+        <button class="btn" data-sum="${esc(k.name)}">${k.ko ? "다시 요약" : "요약 만들기"}</button>
+        <button class="btn ghost" data-raw="${i}">원문 보기</button></div>
+      ${k.ko ? `<div class="kosum">${mdLite(k.ko.text)}</div>` : ""}
+      <pre data-rawbox="${i}" hidden style="margin-top:8px;padding:10px 12px;max-height:480px;overflow:auto">${esc(k.body)}</pre></div></div>`).join("")
     : '<div class="kempty">아직 없습니다. KOA 가 분석하며 배운 요령이 koa-learned 스킬에 쌓이면 여기에 보입니다.</div>';
+  L.skills.forEach((k, i) => { if (openSkills.has(k.name)) $(`[data-lb="${i}"]`).hidden = false; });
 }
 $("#lMem").addEventListener("click", async e => {
   const b = e.target.closest("[data-md]"); if (!b) return;
@@ -420,9 +432,33 @@ $("#lMem").addEventListener("click", async e => {
   try { await api("learned/memory/delete", { target: t, text }); toast("지웠습니다"); loadLearned(); }
   catch (err) { toast(err.message, 4000); }
 });
-$("#lSkills").addEventListener("click", e => {
+// 요약은 우리가 만든 짧은 형식만: "## 제목", "- 목록", 나머지는 문단. 모두 이스케이프 후 `code` 만 살린다.
+function mdLite(t) {
+  const inl = x => esc(x).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  let html = "", inList = false;
+  for (const line of String(t || "").split("\n")) {
+    const l = line.trim();
+    if (/^[-*] /.test(l)) { if (!inList) { html += "<ul>"; inList = true; } html += "<li>" + inl(l.slice(2)) + "</li>"; continue; }
+    if (inList) { html += "</ul>"; inList = false; }
+    if (/^#{1,4} /.test(l)) html += "<h4>" + inl(l.replace(/^#+ /, "")) + "</h4>";
+    else if (l) html += "<p>" + inl(l) + "</p>";
+  }
+  return html + (inList ? "</ul>" : "");
+}
+const openSkills = new Set();
+$("#lSkills").addEventListener("click", async e => {
+  const sb = e.target.closest("[data-sum]");
+  if (sb) {
+    sb.disabled = true; sb.textContent = "요약 중… (10~40초)";
+    try { await api(`learned/skills/${encodeURIComponent(sb.dataset.sum)}/summarize`, {}); toast("요약했습니다"); await loadLearned(); }
+    catch (err) { toast(err.message, 5000); sb.disabled = false; sb.textContent = "다시 시도"; }
+    return;
+  }
+  const rb = e.target.closest("[data-raw]");
+  if (rb) { const b = $(`[data-rawbox="${rb.dataset.raw}"]`); b.hidden = !b.hidden; rb.textContent = b.hidden ? "원문 보기" : "원문 닫기"; return; }
   const r = e.target.closest("[data-ls]"); if (!r) return;
   const b = $(`[data-lb="${r.dataset.ls}"]`); b.hidden = !b.hidden;
+  const n = S.learned.skills[+r.dataset.ls].name; b.hidden ? openSkills.delete(n) : openSkills.add(n);
 });
 function renderChecks(list) {
   S.checks = list;

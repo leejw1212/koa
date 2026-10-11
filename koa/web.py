@@ -213,6 +213,13 @@ class Handler(BaseHTTPRequestHandler):
                 with _lock:
                     left = L.delete_memory(body.get("target") or "", body.get("text") or "")
                 return self._send(200, {"left": len(left)})
+            if method == "POST" and len(p) == 4 and p[:2] == ["learned", "skills"] and p[3] == "summarize":
+                if not re.match(r"^[a-z0-9][a-z0-9._-]{0,63}$", p[2]):
+                    raise ValueError("스킬 이름 형식이 아니다")
+                try:
+                    return self._send(200, L.summarize(p[2]))
+                except (RuntimeError, subprocess.TimeoutExpired) as x:
+                    return self._send(502, {"error": str(x)[:400]})
             if p[:1] == ["knowledge"] and len(p) >= 2:
                 c = p[1]
                 if method == "GET" and len(p) == 2:

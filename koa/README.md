@@ -42,7 +42,7 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `kube_source.py` | flowmap 이 쓰는 읽기 전용 수집기 (kubernetes MCP 또는 kubectl, get/list 만) |
 | `flowmap.py` | 요청 경로 후보. 지식에 없는 것은 제안으로 남긴다. 입구(Ingress·Route) + 워크로드 설정(env·args·ConfigMap)에 적힌 주소 + 파드 로그(다른 파드 IP·Service 주소·요청 ID)로 연결을 찾고 근거·판정을 붙인다. 클러스터에는 get/list/logs 만. 결과 JSON 은 `<결과>/<이름>.flowmap/`. `docs/koa-flowmap.md` |
 | `tests/` | 클러스터 없이 도는 규칙 검사 (`python3 koa/tests/test_flowmap.py` 등) |
-| `learned.py` | 이 프로필의 메모리와 KOA 가 만들거나 고친 스킬 목록 (웹 "KOA 가 배운 것" 탭). `init` 은 `koa-learned` 스킬을 만든다 |
+| `learned.py` | 이 프로필의 메모리와 KOA 가 만들거나 고친 스킬 목록 (웹 "KOA 가 배운 것" 탭). `init` 은 `koa-learned` 스킬을 만든다. `summarize <스킬>` 은 한국어 요약 (KOA 프로필 모델 1회, 도구 없음, `local/learned/summaries/`) |
 | `web.py`, `web/index.html` | 로컬 웹 화면 (127.0.0.1:8765): 클러스터 지식(제안 더하기/버리기 포함) · 과거 이슈 편집 · KOA 가 배운 것. 표준 라이브러리 + PyYAML 만. `docs/koa.md` |
 | `readonly.py` | MCP 계정이 읽기 전용인지 백엔드 권한 질의로 확인 (쓰기 시도 없음). ok / warn / fail / skip |
 | `mcp_client.py` | MCP 서버를 Hermes 와 같은 방식(stdio)으로 띄우는 최소 클라이언트. 허용 목록 밖 도구는 거부 |
