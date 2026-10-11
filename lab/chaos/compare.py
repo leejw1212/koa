@@ -42,7 +42,7 @@ def run_profile(profile, question, outdir, budget, max_turns, res):
 
 def parse(path):
     """stream-json 에서 최종 답·토큰·도구 호출 목록을 뽑는다. 이벤트 모양이 버전마다 조금 달라 넉넉하게 읽는다."""
-    final, tokens, tools = "", {}, collections.Counter()
+    final, tokens, tools, sid = "", {}, collections.Counter(), ""
     calls = []
     for line in open(path):
         try:
@@ -50,6 +50,7 @@ def parse(path):
         except ValueError:
             continue
         t = e.get("type", "")
+        sid = sid or e.get("session_id") or ""
         if t == "result":
             final, tokens = e.get("text", ""), e.get("tokens", {})
             if e.get("error"):
@@ -59,7 +60,7 @@ def parse(path):
             tools[name] += 1
             args = e.get("input") or ""
             calls.append("%s %s" % (name, (args if isinstance(args, str) else json.dumps(args, ensure_ascii=False))[:160]))
-    return final, tokens, tools, calls
+    return final, tokens, tools, calls, sid
 
 
 def score(text, keywords):
@@ -74,7 +75,7 @@ def summarize(outdir, profiles, answer, res=None):
         path = os.path.join(outdir, p + ".jsonl")
         if not os.path.exists(path):
             continue
-        final, tok, tools, calls = parse(path)
+        final, tok, tools, calls, sid = parse(path)
         with open(os.path.join(outdir, p + ".md"), "w") as f:
             f.write(final)
         ok, hits = score(final, answer["keywords"])
@@ -82,8 +83,8 @@ def summarize(outdir, profiles, answer, res=None):
         rows.append("| %s | %s | %s | %s | %s | %s | %s |" % (
             p, "✅" if ok else "❌", ", ".join(h or "—" for h in hits), wall,
             sum(tools.values()), tok.get("total", ""), tok.get("output", "")))
-        bodies.append("## %s\n\n도구 호출 %d회: %s\n\n<details><summary>호출 순서</summary>\n\n```\n%s\n```\n</details>\n\n%s\n" % (
-            p, sum(tools.values()), ", ".join("%s×%d" % kv for kv in tools.most_common()),
+        bodies.append("## %s\n\n세션: `%s`\n\n도구 호출 %d회: %s\n\n<details><summary>호출 순서</summary>\n\n```\n%s\n```\n</details>\n\n%s\n" % (
+            p, sid, sum(tools.values()), ", ".join("%s×%d" % kv for kv in tools.most_common()),
             "\n".join(calls), final))
     md = ["# 장애 분석 비교 — %s" % answer["scenario"], "",
           "- 주입: %s UTC" % answer["injected_at"],

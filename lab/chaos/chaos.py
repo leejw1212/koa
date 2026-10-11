@@ -67,6 +67,23 @@ def _np_callback_blocked():
     }
 
 
+def _np_site_blocked():
+    """누군가 slowsite 를 '인그레스로만 들어오게' 막았다. 워커가 대상 페이지를 가져오다 타임아웃 →
+    5초·15초 뒤 재시도 → dead-letter. 지식의 정상 패턴('대상 사이트 탓의 실패는 앱 장애가 아니다')이
+    함정이다 — 503/404 가 아니라 클러스터 안 연결 타임아웃이다."""
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "slowsite-allow-ingress", "namespace": "linkcard", "labels": {"app": "slowsite"}},
+        "spec": {
+            "podSelector": {"matchLabels": {"app": "slowsite"}},
+            "policyTypes": ["Ingress"],
+            "ingress": [{"from": [{"namespaceSelector": {"matchLabels": {
+                "kubernetes.io/metadata.name": "ingress-nginx"}}}]}],
+        },
+    }
+
+
 SCENARIOS = {
     "callback-blocked": {
         "symptom": "링크카드에서 '만들기'를 누르면 접수는 되는데 '결과를 기다리는 중…'에서 끝나지 않아요. 원인 찾아줘.",
@@ -84,6 +101,23 @@ SCENARIOS = {
         "recover": lambda: kubectl("-n", "linkcard", "delete", "networkpolicy", "linkcard-web-allow-ingress",
                                    "--ignore-not-found"),
         "check": lambda: "linkcard-web-allow-ingress" in kubectl("-n", "linkcard", "get", "networkpolicy", "-o", "name"),
+    },
+    "site-blocked": {
+        "symptom": "링크카드에서 카드를 만들면 한참 기다리다가 전부 '실패'로 끝나요. 원인 찾아줘.",
+        "answer": {
+            "cause": "linkcard 네임스페이스에 NetworkPolicy slowsite-allow-ingress 가 생겨 slowsite 로 들어오는 트래픽을 "
+                     "ingress-nginx 네임스페이스에서만 허용 → 워커가 대상 페이지(http://slowsite:8080)를 가져오다 타임아웃, "
+                     "재시도 후 dead-letter.",
+            "where": "worker 로그 job.retry / job.dead_lettered (timed out); slowsite 로그에 요청이 안 옴; "
+                     "kubectl get networkpolicy -n linkcard; 파드·이벤트는 정상",
+            "fix": "NetworkPolicy 에 app=linkcard-worker 에서 오는 8080 허용 추가 (또는 정책 제거)",
+        },
+        "keywords": [["networkpolicy", "network policy", "네트워크 정책", "네트워크폴리시", "slowsite-allow-ingress"],
+                     ["slowsite", "대상 사이트", "대상 페이지"]],
+        "inject": lambda: kubectl("apply", "-f", "-", data=json.dumps(_np_site_blocked())),
+        "recover": lambda: kubectl("-n", "linkcard", "delete", "networkpolicy", "slowsite-allow-ingress",
+                                   "--ignore-not-found"),
+        "check": lambda: "slowsite-allow-ingress" in kubectl("-n", "linkcard", "get", "networkpolicy", "-o", "name"),
     },
 }
 
