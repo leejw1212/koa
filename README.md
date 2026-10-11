@@ -68,7 +68,7 @@ cd ~/.hermes/profiles/koa && /usr/bin/python3 koa/web.py     # → http://127.0.
 | `terminal/agent-env.sh` | 에이전트 터미널의 `KUBECONFIG` 를 읽기 전용 파일로 | `terminal.shell_init_files` |
 | `distribution.yaml` | 배포 매니페스트 (설치 대상 경로, 선택 env 목록) | – |
 | `docs/` | 설계·검증 기록 | 참고 |
-| `lab/`, `clusters/` | kind-lab 개발용 (설치본에는 안 들어감) | – |
+| `lab/`, `clusters/` | kind-lab 개발용: 장애 주입(`lab/chaos/`), 토큰 발급, 실험용 설치 안내(`lab/kind-lab-fixtures.md`). 설치본에는 안 들어가고 `git clone` 한 개발 체크아웃에만 있다 | – |
 
 설치본에서 사용자 데이터는 업데이트해도 유지된다: `.env`(토큰), `memories/`, `sessions/`, `local/clusters/`(탐색 결과), `local/knowledge/`(클러스터 지식·과거 이슈·제안).
 

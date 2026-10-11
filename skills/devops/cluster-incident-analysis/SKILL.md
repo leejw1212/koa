@@ -14,7 +14,7 @@ metadata:
 
 KOA analyzes only what the user names, using the cluster knowledge in `local/knowledge/<cluster>/`, and
 grows that knowledge with what each analysis teaches — only after the user's OK. Onboarding a new
-cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `references/kind-lab-fixtures.md`.
+cluster (discover, MCP setup) is `koa-cluster-discovery`.
 
 ## When to Use
 
