@@ -159,6 +159,43 @@ details[open] > summary::before { transform: rotate(90deg); }
 .kpick { border-radius: 16px; border: 1px solid var(--edge-soft); background: var(--glass-soft); padding: 12px 14px; margin: 8px 0 12px; max-height: 340px; overflow: auto; }
 .kpick label { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; cursor: pointer; }
 .kempty { color: var(--faint); font-size: 13px; padding: 14px; text-align: center; border: 1px dashed var(--edge-soft); border-radius: 14px; }
+/* 보고서 (마크다운) */
+.rsplit { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .rsplit { grid-template-columns: 1fr; } }
+.rfilter { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 10px; }
+.rlist .item { align-items: flex-start; }
+.rlist .ttl { font-weight: 600; font-size: 13.5px; line-height: 1.4; }
+.rlist .sum { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rlist .when { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+.kindtag { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-top: 2px; }
+.kindtag.triage { background: rgba(178, 106, 0, .12); color: var(--warn); }
+.kindtag.analysis { background: rgba(19, 138, 85, .12); color: var(--ok); }
+.rhead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--edge-soft); }
+.md { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md h1 { font-size: 22px; margin: 0 0 10px; }
+.md h2 { font-size: 17px; margin: 26px 0 10px; padding-top: 14px; border-top: 1px solid var(--edge-soft); }
+.md h3 { font-size: 15px; margin: 20px 0 8px; }
+.md h4 { font-size: 14px; margin: 16px 0 6px; color: var(--muted); }
+.md p { margin: 8px 0; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 3px 0; }
+.md li > p { margin: 2px 0; }
+.md blockquote { margin: 10px 0; padding: 6px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 12px 12px 0; color: var(--muted); }
+.md blockquote p { margin: 4px 0; }
+.md hr { border: 0; border-top: 1px solid var(--edge-soft); margin: 18px 0; }
+.md a { color: var(--accent); }
+.md pre { margin: 10px 0; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.md-table { overflow-x: auto; margin: 10px 0; border-radius: 14px; border: 1px solid var(--edge-soft); background: var(--glass-soft); }
+.md table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.md th, .md td { padding: 7px 11px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--edge-soft);
+  overflow-wrap: break-word; word-break: keep-all; min-width: 3.5em; }
+.md td:has(code), .md td:last-child { min-width: 9em; }
+.md th { font-size: 12px; color: var(--muted); font-weight: 700; background: var(--glass-soft); white-space: nowrap; }
+.md tbody tr:last-child td { border-bottom: 0; }
+.md tbody tr:hover td { background: var(--glass-strong); }
+.md td code { white-space: normal; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -168,6 +205,7 @@ details[open] > summary::before { transform: rotate(90deg); }
     <nav class="seg" id="tabs">
       <button data-tab="ask" class="on">조사 요청</button>
       <button data-tab="results">결과</button>
+      <button data-tab="reports">보고서</button>
       <button data-tab="knowledge">클러스터 지식</button>
       <button data-tab="incidents">과거 이슈</button>
     </nav>
@@ -216,6 +254,18 @@ details[open] > summary::before { transform: rotate(90deg); }
   <div class="split">
     <section class="card glass"><h2>조사 요청</h2><p class="hint">KOA 채팅에 한 줄을 붙여 넣으면 분석해서 결과를 여기에 씁니다.</p><div class="list" id="resultList"></div></section>
     <div id="resultDetail"><section class="card glass empty">요청을 고르세요.</section></div>
+  </div>
+</div>
+
+<div id="tab-reports" hidden>
+  <div class="rsplit">
+    <section class="card glass">
+      <div class="row"><h2 class="grow">보고서</h2><button class="btn ghost" id="rReload" title="다시 읽기">↻</button></div>
+      <p class="hint">KOA 도구가 쓴 마크다운(.md) 파일을 그대로 읽어 보여 줍니다. 채팅이나 터미널에서 새로 돌리면 여기에 생깁니다.</p>
+      <div class="rfilter" id="rFilter"></div>
+      <div class="list rlist" id="rList"></div>
+    </section>
+    <div id="rDetail"><section class="card glass empty">보고서를 고르세요.</section></div>
   </div>
 </div>
 
@@ -285,6 +335,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 <datalist id="compNames"></datalist>
 <datalist id="workloadNames"></datalist>
 
+<script src="/static/md.js"></script>
 <script>
 "use strict";
 const $ = (s, el) => (el || document).querySelector(s);
@@ -310,7 +361,7 @@ const debounce = (fn, ms) => { let h; return (...a) => { clearTimeout(h); h = se
 function showTab(t) {
   S.tab = t; store.set("tab", t);
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
-  ["ask", "results", "knowledge", "incidents"].forEach(x => $("#tab-" + x).hidden = x !== t);
+  ["ask", "results", "reports", "knowledge", "incidents"].forEach(x => $("#tab-" + x).hidden = x !== t);
   const need = ((t === "knowledge" || t === "incidents") && !S.k) || (t === "ask" && !S.cluster) || S.register;
   $("#register").hidden = !need;
   if (need) {
@@ -323,6 +374,7 @@ function showTab(t) {
   }
   clearInterval(S.poll);
   if (t === "results") loadResults();
+  if (t === "reports") loadReports();
 }
 $$("#tabs button").forEach(b => b.onclick = () => { S.register = false; showTab(b.dataset.tab); });
 
@@ -350,7 +402,7 @@ async function register(name) {
 async function setCluster(c) {
   S.cluster = c; S.k = null; S.dirty = false;
   if (c) { store.set("cluster", c); try { S.k = await api(kpath(c)); } catch (e) { S.k = null; } }
-  renderKnowledge(); renderIncidents(); previewPlan(); showTab(S.tab);
+  renderKnowledge(); renderIncidents(); previewPlan(); S.rOpen = null; showTab(S.tab);
 }
 
 // ---------- 조사 요청 ----------
@@ -423,10 +475,10 @@ async function openResult(c, id) {
       <section class="card glass"><h1 style="font-size:20px">${esc(r.plan.request)}</h1><p class="faint">${esc(fmtId(r.id))} · ${esc(r.path)}</p>
         <div class="label" style="margin-top:12px">KOA 채팅에 붙여 넣으세요</div>
         <div class="row"><pre class="grow">${esc(r.prompt)}</pre><button class="btn primary" id="copy">복사</button></div></section>
-      <section class="card glass"><h2>분석 결과</h2>${r.report ? `<pre style="margin-top:8px">${esc(r.report)}</pre>` : '<p class="muted">아직 없습니다. 위 한 줄을 KOA 채팅에 붙여 넣으면 분석을 끝내고 여기에 씁니다.</p>'}</section>
+      <section class="card glass"><h2>분석 결과</h2>${r.report ? `<div class="md" style="margin-top:8px">${KoaMD.render(r.report)}</div>` : '<p class="muted">아직 없습니다. 위 한 줄을 KOA 채팅에 붙여 넣으면 분석을 끝내고 여기에 씁니다.</p>'}</section>
       <section class="card glass"><h2>조사 계획</h2>${planHTML(r.plan)}</section>
       <section class="card glass"><div class="row"><h2 class="grow">트리아지</h2>${stateChip(r.triage.state)}</div>
-        ${r.triage_text ? `<details ${r.triage.state === "failed" ? "open" : ""} style="margin-top:8px"><summary>출력 보기</summary><pre style="margin-top:8px">${esc(r.triage_text)}</pre></details>` : r.triage.state === "running" ? '<p class="muted">kubernetes MCP 로 훑는 중…</p>' : '<p class="muted">실행하지 않았습니다.</p>'}</section>`;
+        ${r.triage_text ? `<details ${r.triage.state === "failed" ? "open" : ""} style="margin-top:8px"><summary>출력 보기</summary><div class="md" style="margin-top:8px">${r.triage.state === "failed" ? `<pre>${esc(r.triage_text)}</pre>` : KoaMD.render(r.triage_text)}</div></details>` : r.triage.state === "running" ? '<p class="muted">kubernetes MCP 로 훑는 중…</p>' : '<p class="muted">실행하지 않았습니다.</p>'}</section>`;
     $("#copy").onclick = () => navigator.clipboard.writeText(r.prompt).then(() => toast("복사했습니다"), () => toast("복사 실패: 직접 선택하세요"));
     if (r.triage.state !== S.lastState) { S.lastState = r.triage.state; loadResults(); }
     if (r.triage.state !== "running" && r.report) clearInterval(S.poll);
@@ -434,6 +486,47 @@ async function openResult(c, id) {
   await draw();
   S.poll = setInterval(draw, 3000);
 }
+
+// ---------- 보고서 (도구가 쓴 마크다운) ----------
+const RKIND = { discover: "탐색", triage: "트리아지", analysis: "조사 결과" };
+S.rKind = store.get("rKind") || "";
+function fmtAt(iso) { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(); }
+async function loadReports() {
+  if (!S.cluster) { $("#rList").innerHTML = '<div class="empty">클러스터를 먼저 고르세요.</div>'; return; }
+  let j; try { j = await api("reports/" + encodeURIComponent(S.cluster)); } catch (e) { $("#rList").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  S.reports = j.reports || [];
+  const cnt = k => S.reports.filter(r => !k || r.kind === k).length;
+  $("#rFilter").innerHTML = [["", "전체"]].concat(Object.entries(RKIND)).map(([k, l]) =>
+    `<span class="chip click ${S.rKind === k ? "accent" : ""}" data-k="${k}">${l} ${cnt(k)}</span>`).join("");
+  $$("#rFilter [data-k]").forEach(c => c.onclick = () => { S.rKind = c.dataset.k; store.set("rKind", S.rKind); loadReports(); });
+  const list = S.reports.filter(r => !S.rKind || r.kind === S.rKind);
+  $("#rList").innerHTML = list.map(r => `<div class="item" data-k="${esc(r.kind)}" data-id="${esc(r.id)}">
+      <span class="kindtag ${esc(r.kind)}">${esc(RKIND[r.kind] || r.kind)}</span>
+      <div class="grow"><div class="ttl">${esc(r.title)}</div>${r.summary ? `<div class="sum">${esc(r.summary)}</div>` : ""}
+      <div class="when">${esc(fmtAt(r.at))}</div></div>${r.kind === "triage" && r.findings != null ? `<span class="chip ${r.findings ? "warn" : "ok"}" style="flex:none">이상 ${r.findings}</span>` : ""}</div>`).join("")
+    || '<div class="empty">아직 없습니다. KOA 채팅에서 "클러스터 확인해줘" 나 트리아지를 돌리면 생깁니다.</div>';
+  $$("#rList .item").forEach(el => { el.onclick = () => openReport(el.dataset.k, el.dataset.id); el.classList.toggle("on", S.rOpen === el.dataset.k + "/" + el.dataset.id); });
+  if (!S.rOpen && list.length) openReport(list[0].kind, list[0].id);
+}
+async function openReport(kind, id) {
+  S.rOpen = kind + "/" + id;
+  $$("#rList .item").forEach(el => el.classList.toggle("on", S.rOpen === el.dataset.k + "/" + el.dataset.id));
+  let r; try { r = await api(`reports/${encodeURIComponent(S.cluster)}/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`); }
+  catch (e) { $("#rDetail").innerHTML = `<section class="card glass empty">${esc(e.message)}</section>`; return; }
+  S.rRaw = false;
+  const draw = () => {
+    $("#rDetail").innerHTML = `<section class="card glass">
+      <div class="rhead"><span class="kindtag ${esc(r.kind)}">${esc(RKIND[r.kind] || r.kind)}</span>
+        <span class="faint grow" title="파일 위치">${esc(r.path)}</span>
+        <button class="btn ghost" id="rRaw">${S.rRaw ? "보기 좋게" : "md 원문"}</button>
+        <button class="btn" id="rCopy">md 복사</button></div>
+      ${S.rRaw ? `<pre>${esc(r.md)}</pre>` : `<div class="md">${KoaMD.render(r.md)}</div>`}</section>`;
+    $("#rRaw").onclick = () => { S.rRaw = !S.rRaw; draw(); };
+    $("#rCopy").onclick = () => navigator.clipboard.writeText(r.md).then(() => toast("복사했습니다"), () => toast("복사 실패"));
+  };
+  draw();
+}
+$("#rReload").onclick = () => { S.rOpen = null; loadReports(); };
 
 // ---------- 클러스터 지식 ----------
 // 상태: SH = { components: {이름: {...}}, flows: [{name, kind, nodes:[]}], normal: [{component, note}] }

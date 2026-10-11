@@ -23,6 +23,8 @@ python3 koa/triage.py --json                   # 전체 결과 JSON
 ```
 
 결과 JSON 은 `<결과 폴더>/<클러스터>.triage/<시각>.json` (설치본 `local/clusters/`, 개발 `clusters/`, 커밋 안 함).
+같은 이름의 `<시각>.md` 에 화면에 찍은 요약(마크다운)도 남긴다. 웹 화면의 '보고서' 탭이 이 md 를 그린다 (`docs/koa-web.md`).
+`triage.render_result(json)` 은 저장된 JSON 에서 같은 md 를 다시 만든다 (md 가 없는 예전 결과용).
 
 ## 3. 무엇을 보나
 

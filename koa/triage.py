@@ -12,6 +12,7 @@
   python3 koa/triage.py --json                   # 전체 결과 JSON 을 표준출력으로
 
 전체 결과는 <결과 폴더>/<이름>.triage/<시각>.json 에 저장한다 (다음 분석 단계가 다시 조회하지 않고 참조).
+같은 이름의 <시각>.md 에 화면에 찍은 요약(마크다운)도 남긴다. 웹 화면(koa/web.py)의 '보고서' 탭이 이 md 를 보여 준다.
 클러스터에는 get/list 만 보낸다. Secret 은 읽지 않는다.
 """
 import argparse
@@ -589,6 +590,29 @@ def render(cluster, at, since, lookback, src, secs, findings, changes, limits, t
     return "\n".join(lines)
 
 
+def _dt(s):
+    if not s:
+        return None
+    t = dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+
+def render_result(result, top=12):
+    """저장된 결과 JSON(koa.triage/v1) → render() 와 같은 마크다운. 예전 JSON 만 있는 결과도 화면에 보이게."""
+    from types import SimpleNamespace as NS
+    findings = [NS(key=f.get("key", "?"), kind=f.get("kind") or "workload", score=f.get("score") or 0,
+                   status=f.get("status") or [], evidence=f.get("evidence") or [], onset=_dt(f.get("onset")),
+                   pods=f.get("pods") or [],
+                   change=dict(f["change"], at=_dt(f["change"].get("at"))) if f.get("change") else None)
+                for f in result.get("findings") or []]
+    changes = [dict(c, at=_dt(c.get("at"))) for c in result.get("changes") or []]
+    since = dt.timedelta(seconds=result.get("since_seconds") or 3600)
+    lookback = dt.timedelta(seconds=result.get("lookback_seconds") or max(since.total_seconds(), 21600))
+    return render(result.get("cluster") or "?", _dt(result.get("at")) or dt.datetime.now(UTC), since, lookback,
+                  result.get("source") or "?", result.get("seconds") or 0, findings, changes,
+                  result.get("limits") or [], top)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since", default="1h", help="이 기간의 이상을 본다 (기본 1h)")
@@ -651,6 +675,7 @@ def main():
 
     result = {
         "schema": "koa.triage/v1", "cluster": cluster, "at": at.isoformat(), "since_seconds": since.total_seconds(),
+        "lookback_seconds": lookback.total_seconds(),
         "source": src.label, "seconds": round(secs, 1),
         "counts": {k: len(v) for k, v in data.items()},
         "findings": [{"key": f.key, "kind": f.kind, "score": f.score, "status": f.status, "evidence": f.evidence,
@@ -659,16 +684,19 @@ def main():
         "changes": [dict(c, at=c["at"].isoformat()) for c in changes],
         "limits": limits,
     }
+    md = render(cluster, at, since, lookback, src.label, secs, findings, changes, limits, a.top)
     if a.json:
         print(json.dumps(result, ensure_ascii=False, indent=1))
     else:
-        print(render(cluster, at, since, lookback, src.label, secs, findings, changes, limits, a.top))
+        print(md)
     if not a.no_save:
+        # 같은 이름으로 JSON(다음 분석 단계용) + 마크다운(사람·웹 화면용) 두 개를 남긴다
         out = CLUSTERS / ("%s.triage" % cluster) / ("%s.json" % at.strftime("%Y%m%dT%H%M%SZ"))
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        out.with_suffix(".md").write_text(md + "\n")
         if not a.json:
-            print("\n전체 결과: %s" % str(out).replace(str(Path.home()), "~", 1))
+            print("\n전체 결과: %s (+ .md)" % str(out).replace(str(Path.home()), "~", 1))
 
 
 if __name__ == "__main__":

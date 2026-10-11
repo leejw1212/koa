@@ -9,6 +9,8 @@
 
   local/knowledge/<클러스터>/       flows.yaml · architecture.md · incidents/*.md  (knowledge.py 와 같은 파일)
   local/requests/<클러스터>/<시각>/  request.yaml(조사 계획) · triage.txt · report.md(KOA 가 분석 후 씀)
+  보고서 탭: 탐색(<결과>/<클러스터>.report.md) · 트리아지(<결과>/<클러스터>.triage/*.md) · 조사 결과(report.md)
+            를 마크다운 그대로 읽어 화면에서 그린다 (koa/web/md.js). 읽기만 한다.
 """
 import argparse
 import datetime as dt
@@ -28,9 +30,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import freeform as F  # noqa: E402
 import knowledge as K  # noqa: E402
-from paths import REPO, REQUESTS  # noqa: E402
+from paths import CLUSTERS, REPO, REQUESTS  # noqa: E402
 
 HTML = Path(__file__).resolve().parent / "web" / "index.html"
+STATIC = {"md.js": ("application/javascript; charset=utf-8", Path(__file__).resolve().parent / "web" / "md.js")}
 ID_RE = re.compile(r"^\d{8}T\d{6}Z$")
 FILE_RE = re.compile(r"^[0-9A-Za-z가-힣._-]{1,80}\.md$")
 _lock = threading.Lock()
@@ -313,6 +316,118 @@ def get_request(c, rid):
             "triage_text": read("triage.txt"), "report": read("report.md"), "prompt": chat_prompt(d), "path": rel(d)}
 
 
+# ---------- 보고서 (마크다운) ----------
+# 도구가 만든 md 를 그대로 읽어 화면에 보낸다. 화면이 마크다운을 그린다 (koa/web/md.js).
+#   탐색      <결과>/<클러스터>.report.md                  (discover.py)
+#   트리아지  <결과>/<클러스터>.triage/<시각>.md            (triage.py, 예전 결과는 .json 에서 그 자리에서 만든다)
+#   조사 결과 local/requests/<클러스터>/<시각>/report.md   (KOA 가 분석 후 씀)
+REPORT_KINDS = {"discover": "탐색", "triage": "트리아지", "analysis": "조사 결과"}
+
+
+def _md_title(md, default):
+    for ln in md.splitlines():
+        if ln.startswith("# "):
+            return ln[2:].strip()
+    return default
+
+
+def _md_summary(md):
+    """제목 다음 첫 글 줄 (인용 > 기호·굵게 빼고)."""
+    seen = False
+    for ln in md.splitlines():
+        if ln.startswith("# "):
+            seen = True
+            continue
+        s = ln.strip().lstrip(">").strip().replace("**", "").replace("`", "")
+        if seen and s and not s.startswith(("|", "#")):
+            return s[:160]
+    return ""
+
+
+def _iso(ts):
+    try:
+        return dt.datetime.strptime(ts, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+
+
+def _discover_files(c):
+    if not CLUSTERS.is_dir():
+        return []
+    return [f for f in [CLUSTERS / ("%s.report.md" % c)] + sorted(CLUSTERS.glob("*@%s.report.md" % c)) if f.is_file()]
+
+
+def _triage_md(f):
+    """트리아지 결과 하나의 md. .md 가 없으면(예전 결과) .json 에서 같은 모양으로 만든다 (파일은 쓰지 않는다)."""
+    md = f.with_suffix(".md")
+    if md.is_file():
+        return md.read_text()
+    import triage as T  # 무겁지 않지만 보고서 볼 때만 쓴다
+    return T.render_result(json.loads(f.read_text()))
+
+
+def list_reports(c):
+    K.cluster_dir(c)  # 이름 검사
+    out = []
+    for f in _discover_files(c):
+        md = f.read_text()
+        out.append({"kind": "discover", "id": f.name[:-len(".report.md")], "title": _md_title(md, "탐색 결과"),
+                    "summary": _md_summary(md), "at": dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "path": rel(f)})
+    tdir = CLUSTERS / ("%s.triage" % c)
+    if tdir.is_dir():
+        ids = sorted({p.stem for p in tdir.iterdir() if p.suffix in (".json", ".md") and ID_RE.match(p.stem)}, reverse=True)
+        for rid in ids:
+            try:
+                md = _triage_md(tdir / (rid + ".json")) if (tdir / (rid + ".json")).is_file() else (tdir / (rid + ".md")).read_text()
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            n = re.search(r"이상 (\d+)건", md)
+            w = re.search(r"· 최근 (\S+) ·", md)
+            out.append({"kind": "triage", "id": rid, "title": "트리아지 · 최근 %s" % w.group(1) if w else _md_title(md, "트리아지"),
+                        "summary": _md_summary(md), "at": _iso(rid), "findings": int(n.group(1)) if n else None,
+                        "path": rel(tdir / (rid + ".md"))})
+    rdir = req_dir(c)
+    if rdir.is_dir():
+        for d in sorted(rdir.iterdir(), reverse=True):
+            f = d / "report.md"
+            if not (ID_RE.match(d.name) and f.is_file()):
+                continue
+            md = f.read_text()
+            try:
+                q = (yaml.safe_load((d / "request.yaml").read_text()) or {}).get("request", "") if (d / "request.yaml").is_file() else ""
+            except yaml.YAMLError:
+                q = ""
+            out.append({"kind": "analysis", "id": d.name, "title": _md_title(md, q or "조사 결과"), "summary": q or _md_summary(md),
+                        "at": _iso(d.name), "path": rel(f)})
+    out.sort(key=lambda r: r.get("at") or "", reverse=True)
+    return out
+
+
+def get_report(c, kind, rid):
+    K.cluster_dir(c)
+    if kind == "discover":
+        f = next((x for x in _discover_files(c) if x.name[:-len(".report.md")] == rid), None)
+        if not f:
+            raise LookupError("탐색 보고서가 없다")
+        return {"kind": kind, "id": rid, "md": f.read_text(), "path": rel(f)}
+    if not ID_RE.match(rid or ""):
+        raise ValueError("id 형식이 아니다")
+    if kind == "triage":
+        tdir = CLUSTERS / ("%s.triage" % c)
+        j, m = tdir / (rid + ".json"), tdir / (rid + ".md")
+        if not (j.is_file() or m.is_file()):
+            raise LookupError("트리아지 결과가 없다")
+        return {"kind": kind, "id": rid, "md": _triage_md(j) if j.is_file() else m.read_text(),
+                "path": rel(m if m.is_file() else j), "json": rel(j) if j.is_file() else None}
+    if kind == "analysis":
+        f = req_dir(c, rid) / "report.md"
+        if not f.is_file():
+            raise LookupError("조사 결과가 없다")
+        return {"kind": kind, "id": rid, "md": f.read_text(), "path": rel(f)}
+    raise ValueError("보고서 종류: %s" % ", ".join(REPORT_KINDS))
+
+
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
@@ -356,6 +471,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method == "GET" and parts == []:
                 return self._send(200, raw=HTML.read_bytes(), ctype="text/html; charset=utf-8")
+            if method == "GET" and len(parts) == 2 and parts[0] == "static" and parts[1] in STATIC:
+                ctype, f = STATIC[parts[1]]
+                return self._send(200, raw=f.read_bytes(), ctype=ctype)
             if parts[:1] != ["api"]:
                 return self._send(404, {"error": "not found"})
             p = parts[1:]
@@ -405,6 +523,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"id": create_request(body)})
             if method == "GET" and len(p) == 3 and p[0] == "requests":
                 return self._send(200, get_request(p[1], p[2]))
+            if method == "GET" and len(p) == 2 and p[0] == "reports":
+                return self._send(200, {"reports": list_reports(p[1]), "kinds": REPORT_KINDS})
+            if method == "GET" and len(p) == 4 and p[0] == "reports":
+                return self._send(200, get_report(p[1], p[2], p[3]))
             return self._send(404, {"error": "not found"})
         except LookupError as x:
             return self._send(404, {"error": str(x)})

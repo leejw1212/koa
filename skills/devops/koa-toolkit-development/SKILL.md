@@ -44,6 +44,12 @@ KOA ships as a Hermes profile distribution. Two copies exist:
   the first output line so the user can audit it. Reachability GETs are allowed; requests that make an
   app do work need the user's OK (SOUL).
 - Keep scripts Python 3.9-compatible (macOS system python) and stdlib + PyYAML only.
+- **Results are markdown first, viewable in the web.** A tool that produces a result for people writes a
+  `.md` next to its machine `.json` (same stem, same content as its terminal output), and the web
+  '보고서' tab lists it via `web.py list_reports` + renders it with `koa/web/md.js` (no external libs,
+  escape-first, http(s) links only). When a new tool adds a result location, register it in
+  `list_reports`/`get_report` and keep an id regex there (path traversal guard). Old results that only
+  have JSON are rendered on the fly from the JSON (`triage.render_result`), never by writing files on GET.
 
 ## Syncing the installed profile from the remote
 
@@ -62,6 +68,10 @@ KOA ships as a Hermes profile distribution. Two copies exist:
    python3 -c "import yaml;yaml.safe_load(open('koa/catalog.yaml'))"
    ```
    Then grep new code for environment-specific strings and scan `git diff` + untracked files for secrets.
+1b. `diff -rq <checkout>/skills <installed>/skills/<category>` for KOA skills that exist only in the
+   installed profile (e.g. a skill created by an agent mid-session): copy them into the checkout and commit
+   them, or the update deletes them. Hermes-bundled skills (listed in `skills/.bundled_manifest`) stay out
+   of the repo; just include them in the backup.
 2. Bump `version:` in `distribution.yaml` (the update message shows it; same version hides the change).
 3. Update the human docs with the change (`docs/koa-*.md` section, `koa/README.md` tool table, SOUL
    tool list if a new tool) and the governing skill in the checkout.
@@ -82,10 +92,35 @@ KOA ships as a Hermes profile distribution. Two copies exist:
 | the new tool, run once from the installed copy | same result as from the checkout |
 
 Then tell the user: a running `koa/web.py` still serves the old code until restarted; SOUL/skill
-changes apply from a new chat (restart the desktop app).
+changes apply from a new chat (restart the desktop app). Offer the web restart rather than doing it
+unasked.
+
+## Restarting `koa/web.py` (user asks "웹 재시작해")
+
+1. `pgrep -fl koa/web.py`; read its cwd (`lsof -a -p <pid> -d cwd -Fn`), args and `HERMES_HOME`
+   (`ps -E -o command= -p <pid>`) so the new process uses the same profile, port and bind address.
+2. `kill <pid>` (TERM), wait until `kill -0` fails.
+3. Start it again from the profile dir as a background process with `persist_on_release=true` (a server
+   the user wants to outlive the chat): `HERMES_HOME=<profile> python3 -u koa/web.py --port <port>`.
+4. Verify with read-only calls: `GET /` → 200; `GET /api/knowledge/<c>` → counts + `check == []`;
+   `POST /api/plan` with header `X-KOA: 1` (POSTs without it get 403) and body
+   `{"cluster","question"}` → the new plan path. `/api/plan` writes nothing; don't use `/api/requests`
+   for verification (it creates a request folder and starts triage).
+5. Tell the user to refresh the browser tab.
 
 ## Testing technique
 
+- Web UI changes before release: copy the checkout's `koa/` + `distribution.yaml` into
+  `$HERMES_HOME/cache/scratch/<dir>/`, add an empty `memories/` (makes `paths.INSTALLED` true) and symlink
+  `local` → the profile's `local/`, then run `/usr/bin/python3 -u koa/web.py --port <other port>` there. The
+  real 8765 server stays untouched; check with the browser tool + `browser_console` (expect no JS errors),
+  measure table column widths via a console expression. Anything the test server writes lands in the real
+  `local/` through the symlink. Delete the scratch dir afterwards.
+- When re-rendering stored JSON into the live text format, build the stand-in objects with every attribute
+  the render path touches (e.g. `next_steps` reads `pods`/`score`); assert JSON-render == live-render in a
+  test, which catches dropped fields.
+- Korean text in narrow table cells breaks one character per line under `overflow-wrap: anywhere`; use
+  `word-break: keep-all` + a cell `min-width` for markdown tables.
 - Tests are plain `unittest` files runnable as `python3 koa/tests/test_<x>.py` (no pytest).
 - Feed rule functions synthetic objects (dicts shaped like `kubectl get -o json` items, fake log lines)
   — no cluster needed, so they run anywhere.
