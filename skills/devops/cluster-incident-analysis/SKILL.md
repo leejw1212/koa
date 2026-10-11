@@ -81,6 +81,10 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `refe
    after writing; it flags branching flows.
    Skill edits (skill_manage on `koa-learned`) work in one-shot `-q` mode too; only dangerous terminal commands
    (heredoc etc.) are blocked there — write JSON with `@file` via write_file, or pass it inline.
+   Give each JSON file a new name (`cache/scratch/<kind>-<what>-<HHMMSS>.json`), never a generic `add.json`:
+   write_file refuses to overwrite a file this session has not read, so a leftover from an earlier run fails the
+   write. Delete the files after `add`/`incident` succeeds. If any write or command failed on the way, say so in
+   the answer (what failed, what you did instead), even when the retry worked.
    Rows the user declines but that may matter later → `knowledge.py suggest <c> '<json>' --title "…" --why "…"`
    only if they say "나중에". Use `--dry-run` first when unsure what `add` will change.
 8. **Self-improvement — do it in this same reply, before the final answer** (no OK needed, tell the user in one
