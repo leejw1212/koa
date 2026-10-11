@@ -65,7 +65,7 @@ class Context(unittest.TestCase):
 
     def test_explicit_names(self):
         p = ctx("이거 봐줘", names=["주문-조회"])
-        self.assertEqual(p["flows"], {"주문-조회": ["gw", "shop-api", "pg"]})
+        self.assertEqual(p["flows"], {"주문-조회": "gw → shop-api → pg"})
         self.assertNotIn("mq", p["components"])
 
     def test_incident_by_component_or_log(self):
@@ -184,6 +184,15 @@ class Store(unittest.TestCase):
             K.recur_incident("c1", "../x.md", {})
         with self.assertRaises(LookupError):
             K.recur_incident("c1", "none.md", {})
+
+    def test_branching_flow_is_flagged_and_shown_truthfully(self):
+        f = {"hops": [{"from": "a", "to": "b", "role": "call"}, {"from": "b", "to": "q", "role": "produce"},
+                      {"from": "b", "to": "cache", "role": "call"}, {"from": "q", "to": "w", "role": "consume"}]}
+        self.assertEqual(K.flow_text(f), "a → b → q → w; b → cache")
+        self.assertEqual(K.flow_text({"hops": ["a", "b", "c"]}), "a → b → c")
+        data = {"components": {n: {"workload": "ns/Deployment/%s" % n} for n in ("a", "b", "q", "w", "cache")},
+                "flows": {"f": f}, "normal": []}
+        self.assertTrue(any("갈래" in m for _, m in K.check("c1", data)))
 
 
 if __name__ == "__main__":

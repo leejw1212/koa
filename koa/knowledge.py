@@ -159,6 +159,23 @@ def edges(flow):
     return out
 
 
+def flow_text(flow):
+    """사람·모델이 읽을 흐름 한 줄. 곧은 사슬이면 'a → b → c', 갈래가 있으면 'a → b → c; b → d'.
+    (flow_nodes 는 노드를 한 줄로 펴서 갈래가 있으면 'b → d → c' 처럼 틀리게 읽힌다)"""
+    es = edges(flow)
+    if not es:
+        return " → ".join(flow_nodes(flow))
+    chains = []
+    for e in es:
+        for c in chains:
+            if c[-1] == e["from"]:
+                c.append(e["to"])
+                break
+        else:
+            chains.append([e["from"], e["to"]])
+    return "; ".join(" → ".join(c) for c in chains)
+
+
 def flow_nodes(flow):
     seen = []
     for e in edges(flow):
@@ -589,6 +606,9 @@ def check(cluster, data=None):
                     out.append(("warn", "흐름 %s: '%s' 가 구성요소에 없다 (워크로드를 모른다)" % (fname, n)))
             if e["role"] not in ROLES:
                 out.append(("error", "흐름 %s: role '%s' 는 produce | consume | call 중 하나" % (fname, e["role"])))
+        if ";" in flow_text(f):
+            out.append(("warn", "흐름 %s: 한 줄이 아니라 갈래가 있다 (%s). 웹 화면은 한 줄로만 다뤄 저장하면 순서가 바뀐다 → "
+                                "갈래는 별도 흐름으로 (knowledge.py add)" % (fname, flow_text(f))))
     for n in data.get("normal") or []:
         if isinstance(n, dict) and n.get("component") and n["component"] not in comps:
             out.append(("warn", "정상 패턴: '%s' 가 구성요소에 없다" % n["component"]))
@@ -655,7 +675,7 @@ def context(cluster, question, names=None, data=None, incidents=None):
     flow_view = {}
     for fn in hit_f:
         nodes = flow_nodes(flows[fn])
-        flow_view[fn] = nodes
+        flow_view[fn] = flow_text(flows[fn])
         for n in nodes:
             for c in node_to_comps(n, comps) or []:
                 if c not in scope:
@@ -685,7 +705,7 @@ def context(cluster, question, names=None, data=None, incidents=None):
 def context_text(p):
     L = ["질문: %s" % p["request"], "말한 것: %s" % (", ".join(p["asked"]) or "(없음)")]
     for fn, nodes in p["flows"].items():
-        L.append("흐름 %s: %s" % (fn, " → ".join(nodes)))
+        L.append("흐름 %s: %s" % (fn, nodes))
     if p["components"]:
         L.append("구성요소:")
         for n, c in p["components"].items():

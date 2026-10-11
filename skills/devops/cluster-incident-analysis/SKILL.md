@@ -75,6 +75,12 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `refe
    after OK, append it to that file: `python3 koa/knowledge.py recur <c> <incident-file> '{"date": "…", "note":
    "한 줄", "logs": ["새로 본 문구"]}'`. A new incident is only for a cause not already recorded.
    `add` only adds (merges list fields, fills empty fields, skips flows already known); show its output.
+   **Never edit `flows.yaml` by hand.** A flow is one straight chain; a side call (web also writes to redis) is its
+   own flow, e.g. `{"name": "카드-접수-저장", "nodes": ["linkcard-web", "redis"]}`. If `add` skips it as "already
+   inside a known flow", that hop is already known — say so instead of forcing it in. Run `knowledge.py check`
+   after writing; it flags branching flows.
+   Skill edits (skill_manage on `koa-learned`) work in one-shot `-q` mode too; only dangerous terminal commands
+   (heredoc etc.) are blocked there — write JSON with `@file` via write_file, or pass it inline.
    Rows the user declines but that may matter later → `knowledge.py suggest <c> '<json>' --title "…" --why "…"`
    only if they say "나중에". Use `--dry-run` first when unsure what `add` will change.
 8. **Self-improvement** (no OK needed, tell the user in one line): a cluster-independent analysis lesson →
