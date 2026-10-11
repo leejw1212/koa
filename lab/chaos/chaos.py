@@ -105,6 +105,10 @@ def _redis(*cmd):
     return kubectl("-n", "linkcard", "exec", "redis-0", "--", "redis-cli", *cmd)
 
 
+def _rmq(*cmd):
+    return kubectl("-n", "linkcard", "exec", "rabbitmq-0", "--", "rabbitmqctl", *cmd)
+
+
 SCENARIOS = {
     "callback-blocked": {
         "symptom": "링크카드에서 '만들기'를 누르면 접수는 되는데 '결과를 기다리는 중…'에서 끝나지 않아요. 원인 찾아줘.",
@@ -173,6 +177,26 @@ SCENARIOS = {
         "inject": lambda: kubectl("apply", "-f", "-", data=json.dumps(_np_worker_egress())),
         "recover": lambda: kubectl("-n", "linkcard", "delete", "networkpolicy", "linkcard-worker-egress", "--ignore-not-found"),
         "check": lambda: "linkcard-worker-egress" in kubectl("-n", "linkcard", "get", "networkpolicy", "-o", "name"),
+    },
+    # 지식에 없는 종류: k8s 객체 변경 없음(실행 중 브로커 설정만), 파드·이벤트·재시작 정상, NetworkPolicy 없음.
+    # 과거 이슈(네트워크 정책 3건, redis OOM)와 겉모습이 겹친다(오류·타임아웃·결과 안 나옴).
+    "rmq-memory-alarm": {
+        "symptom": "링크카드에서 만들기를 누르면 한참 돌다가 오류가 나요. 아까부터 계속 그래요. 원인 찾아줘.",
+        "answer": {
+            "cause": "rabbitmq 의 메모리 경보 기준(vm_memory_high_watermark)이 실행 중 50MB 로 낮아져 이미 쓰는 메모리보다 작다 → "
+                     "memory alarm 이 켜져 브로커가 발행(publish)하는 연결을 전부 막음(connection.blocked). "
+                     "web 의 POST /api/cards 가 큐에 넣다 멈춤 → gunicorn 60초 WORKER TIMEOUT → 인그레스 502/504. "
+                     "워커의 재시도 발행도 같은 연결에서 막힌다.",
+            "where": "rabbitmq 로그 'memory resource limit alarm set' / 'Publishers will be blocked'; "
+                     "rabbitmqctl status 의 Alarms; web 로그에 job.queued 가 끊기고 gunicorn WORKER TIMEOUT; "
+                     "ingress 로그 502/504 ~60s. NetworkPolicy 없음, redis 정상, 파드 재시작 없음. k8s 에 흔적 없음",
+            "fix": "watermark 원복(rabbitmqctl set_vm_memory_high_watermark 0.6) 또는 브로커 재시작 — 운영자 조치",
+        },
+        "keywords": [["rabbitmq", "래빗", "rmq", "브로커"],
+                     ["memory alarm", "메모리 경보", "memory resource limit", "watermark", "blocked", "막", "alarm"]],
+        "inject": lambda: _rmq("set_vm_memory_high_watermark", "absolute", "50MB"),
+        "recover": lambda: _rmq("set_vm_memory_high_watermark", "0.6"),
+        "check": lambda: "memory" in _rmq("status").split("Alarms", 1)[-1].split("\n\n", 2)[1].lower(),
     },
 }
 
