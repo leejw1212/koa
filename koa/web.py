@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""KOA 웹 화면 — 클러스터 지식 편집, 조사 요청, 결과 보기. 이 컴퓨터에서만 연다 (127.0.0.1).
+"""KOA 웹 화면 — 클러스터 지식(구성요소·흐름·정상 패턴·제안)과 과거 이슈를 보고 고친다.
 
   python3 koa/web.py                 # http://127.0.0.1:8765
   python3 koa/web.py --port 9000
 
-표준 라이브러리 + PyYAML 만 쓴다 (설치본에 따로 깔 것 없음). 하는 일은 파일 읽기·쓰기와
-트리아지(koa/triage.py, 읽기 전용) 실행뿐이고 클러스터는 바꾸지 않는다.
-
-  local/knowledge/<클러스터>/       flows.yaml · architecture.md · incidents/*.md  (knowledge.py 와 같은 파일)
-  local/requests/<클러스터>/<시각>/  request.yaml(조사 계획) · triage.txt · report.md(KOA 가 분석 후 씀)
-  보고서 탭: 탐색(<결과>/<클러스터>.report.md) · 트리아지(<결과>/<클러스터>.triage/*.md) · 조사 결과(report.md)
-            를 마크다운 그대로 읽어 화면에서 그린다 (koa/web/md.js). 읽기만 한다.
+분석은 KOA 채팅에서 한다. 이 화면은 지식 파일만 읽고 쓴다 (local/knowledge/<클러스터>/, knowledge.py 와 같은 파일).
+표준 라이브러리 + PyYAML 만 쓴다. 클러스터에는 워크로드 목록 조회(get/list) 하나만 보낸다.
 """
 import argparse
 import datetime as dt
@@ -23,31 +18,19 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import freeform as F  # noqa: E402
 import knowledge as K  # noqa: E402
-from paths import CLUSTERS, REPO, REQUESTS  # noqa: E402
+from paths import REPO  # noqa: E402
 
 HTML = Path(__file__).resolve().parent / "web" / "index.html"
-STATIC = {"md.js": ("application/javascript; charset=utf-8", Path(__file__).resolve().parent / "web" / "md.js")}
-ID_RE = re.compile(r"^\d{8}T\d{6}Z$")
 FILE_RE = re.compile(r"^[0-9A-Za-z가-힣._-]{1,80}\.md$")
+SID_RE = re.compile(r"^[0-9a-f]{10}$")
 _lock = threading.Lock()
 _REMOTE = False  # --host 0.0.0.0 이면 True (외부 접속 허용)
-
-
-def req_dir(cluster, rid=None):
-    K.cluster_dir(cluster)  # 이름 검사
-    d = REQUESTS / cluster
-    if rid is None:
-        return d
-    if not ID_RE.match(rid):
-        raise ValueError("요청 id 형식이 아니다")
-    return d / rid
 
 
 def rel(p):
@@ -57,89 +40,44 @@ def rel(p):
         return str(p)
 
 
-def chat_prompt(d):
-    return "%s 의 조사 요청을 분석해줘. 결과는 같은 폴더의 report.md 에 써줘." % rel(d / "request.yaml")
+def checks(lst):
+    return [{"level": lv, "msg": m} for lv, m in lst]
 
 
 # ---------- 지식 ----------
-
-def understood(data):
-    """flows.yaml 내용을 화면용으로: 흐름은 구간 목록으로."""
-    return {"components": data.get("components") or {},
-            "flows": {n: {"kind": f.get("kind"), "edges": K.edges(f)} for n, f in (data.get("flows") or {}).items()},
-            "normal": data.get("normal") or []}
-
 
 def get_knowledge(c):
     d = K.cluster_dir(c)
     if not d.is_dir():
         raise LookupError("지식이 없는 클러스터: %s" % c)
     data = K.load_flows(c)
-    f = d / "flows.yaml"
-    a = d / "architecture.md"
     incs = K.load_incidents(c)
     for i in incs:
         i["text"] = i["body"] or incident_text_from_meta(i["meta"])
     return {
         "cluster": c,
-        "text": a.read_text() if a.is_file() else "",
-        "understood": understood(data),
-        "raw": f.read_text() if f.is_file() else "",
+        "understood": {"components": data["components"],
+                       "flows": {n: {"kind": f.get("kind"), "nodes": K.flow_nodes(f)} for n, f in data["flows"].items()},
+                       "normal": data["normal"]},
         "incidents": incs,
-        "check": [{"level": lv, "msg": m} for lv, m in K.check(c, data)],
+        "suggestions": K.list_suggestions(c),
+        "check": checks(K.check(c, data)),
         "path": rel(d),
     }
 
 
 def incident_text_from_meta(m):
-    """예전(폼으로 쓴) 이슈를 글로 보여 주기."""
     parts = [str(m.get("date") or ""), m.get("cause") or ""]
     if m.get("found_by"):
         parts.append("찾은 방법: %s" % m["found_by"])
-    logs = (m.get("signature") or {}).get("logs") if isinstance(m.get("signature"), dict) else None
+    logs = K.incident_logs(m)
     if logs:
         parts.append("로그: " + ", ".join('"%s"' % x for x in logs))
     return "\n".join(p for p in parts if p)
 
 
-def build(c, text):
-    """자유 글 → flows.yaml dict + 메모. 클러스터에서 온 값(워크로드·종류)만 이어받고 별명 등은 글이 정한다."""
-    old = K.load_flows(c).get("components") or {}
-    keep = {n: {k: v for k, v in (x or {}).items() if k in ("workload", "kind")} for n, x in old.items()}
-    keep = {n: x for n, x in keep.items() if x.get("kind") or n.lower() in text.lower()}
-    wl = workloads(c).get("workloads") or []
-    parts, notes = F.extract(text, keep, wl)
-    data = {"schema": "koa.knowledge/v1", "cluster": c}
-    data.update(parts)
-    return data, notes
-
-
-def preview_text(c, body):
-    data, notes = build(c, body.get("text") or "")
-    return {"understood": understood(data), "notes": notes,
-            "check": [{"level": lv, "msg": m} for lv, m in K.check(c, data)]}
-
-
-def save_text(c, body):
-    d = K.cluster_dir(c)
-    text = body.get("text") or ""
-    data, notes = build(c, text)
-    out = ("# KOA 클러스터 지식 — 구조. architecture.md (자유 글) 에서 웹 화면이 자동으로 뽑았다.\n"
-           "# 고치려면 architecture.md 를 고치고 웹에서 저장한다 (이 파일을 직접 고치면 다음 저장 때 덮인다).\n"
-           + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
-    with _lock:
-        (d / "architecture.md").write_text(text)
-        f = d / "flows.yaml"
-        if f.is_file():
-            (d / "flows.yaml.bak").write_text(f.read_text())
-        f.write_text(out)
-    return {"understood": understood(data), "notes": notes,
-            "check": [{"level": lv, "msg": m} for lv, m in K.check(c, data)]}
-
-
 def incident_preview(c, body):
-    comps = K.load_flows(c).get("components") or {}
-    return F.incident_meta(body.get("text") or "", comps, K.find_symptom)
+    return K.incident_meta(body.get("text") or "", K.load_flows(c)["components"])
 
 
 def save_incident(c, body):
@@ -166,10 +104,10 @@ def delete_incident(c, name):
         f.unlink()
 
 
-# ---------- 클러스터 등록 도우미 ----------
+# ---------- 클러스터 고르기 ----------
 
 def kubeconfig_context():
-    """읽기 전용 kubeconfig 의 현재 컨텍스트에서 -readonly 를 뺀 이름 (트리아지가 쓰는 클러스터 이름)."""
+    """읽기 전용 kubeconfig 의 현재 컨텍스트에서 -readonly 를 뺀 이름."""
     kc = Path(os.environ.get("KOA_KUBECONFIG") or Path.home() / ".kube" / "hermes-readonly.yaml").expanduser()
     try:
         ctx = (yaml.safe_load(kc.read_text()) or {}).get("current-context") or ""
@@ -179,41 +117,19 @@ def kubeconfig_context():
 
 
 def cluster_name(n):
-    """후보 이름 → 지식 폴더로 쓸 클러스터명. 'user@cluster' 컨텍스트/탐색 프로필(dev2-admin@dev2-kr-west1)은
-    @ 뒤 부분을 쓴다 (클러스터 이름엔 @ 가 없다). 안 맞으면 원래 이름 반환."""
-    if n:
-        n = n.strip()
-        if "@" in n:
-            n = n.rsplit("@", 1)[1]
-    return n or None
-
-
-def auto_onboard():
-    """kubeconfig 컨텍스트가 가리키는 클러스터를 아직 지식이 없으면 자동으로 온보딩한다
-    (지식 폴더 생성 + 탐색 프로필에서 구성요소 seed). 이미 온보딩됐으면 그대로 둔다.
-    반환: 방금 자동 등록한 클러스터명, 없으면 None."""
-    cname = cluster_name(kubeconfig_context())
-    if not cname or not K.NAME_RE.match(cname):
-        return None
-    if K.cluster_dir(cname).is_dir():
-        return None  # 이미 온보딩됨
-    try:
-        K.init(cname, example=False)
-        return cname
-    except ValueError:
-        return None
+    """'user@cluster' 컨텍스트/탐색 프로필 이름은 @ 뒤를 쓴다."""
+    n = (n or "").strip()
+    return (n.rsplit("@", 1)[1] if "@" in n else n) or None
 
 
 def cluster_info():
-    auto = auto_onboard()
     have = K.clusters()
     cands = []
     for n in K.discovered() + [kubeconfig_context()]:
         cname = cluster_name(n)
         if cname and K.NAME_RE.match(cname) and cname not in have and cname not in cands:
             cands.append(cname)
-    return {"clusters": have, "candidates": cands, "context": kubeconfig_context(),
-            "auto_onboarded": auto}
+    return {"clusters": have, "candidates": cands, "context": kubeconfig_context()}
 
 
 _wl_cache = {}
@@ -226,8 +142,7 @@ def workloads(cluster):
     if hit and time.time() - hit[0] < 60:
         return hit[1]
     kc = Path(os.environ.get("KOA_KUBECONFIG") or Path.home() / ".kube" / "hermes-readonly.yaml").expanduser()
-    prof = K.profile(cluster) or {}
-    ctx = (prof.get("kubeconfig") or {}).get("context")
+    ctx = ((K.profile(cluster) or {}).get("kubeconfig") or {}).get("context")
     cmd = ["kubectl", "--kubeconfig", str(kc), "--request-timeout=15s"] + (["--context", ctx] if ctx else []) + \
           ["get", "deployments,statefulsets,daemonsets", "-A", "-o",
            "jsonpath={range .items[*]}{.metadata.namespace}/{.kind}/{.metadata.name}{\"\\n\"}{end}"]
@@ -242,192 +157,6 @@ def workloads(cluster):
     return out
 
 
-# ---------- 조사 요청 ----------
-
-def run_triage(d, plan, source):
-    cmd = [sys.executable, str(REPO / "koa" / "triage.py"), "--name", plan["cluster"], "--since", plan["since"], "--source", source]
-    if plan.get("namespaces"):
-        cmd += ["--ns", ",".join(plan["namespaces"])]
-    (d / "status.json").write_text(json.dumps({"state": "running", "cmd": cmd[1:]}, ensure_ascii=False))
-    try:
-        p = subprocess.run(cmd, cwd=str(REPO), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
-        out, rc = p.stdout.decode("utf-8", "replace"), p.returncode
-    except subprocess.TimeoutExpired:
-        out, rc = "트리아지가 600초 안에 끝나지 않았다", -1
-    (d / "triage.txt").write_text(out)
-    (d / "status.json").write_text(json.dumps({"state": "done" if rc == 0 else "failed", "rc": rc, "cmd": cmd[1:]}, ensure_ascii=False))
-
-
-def create_request(body):
-    c = body.get("cluster") or ""
-    q = (body.get("question") or "").strip()
-    if not q:
-        raise ValueError("질문이 비었다")
-    has_k = K.cluster_dir(c).is_dir()
-    plan = K.plan(c, q, (body.get("since") or "").strip() or None, force_target=(body.get("target") or "").strip() or None) if has_k else {
-        "request": q, "cluster": c, "target": None, "symptom": K.find_symptom(q), "since": (body.get("since") or "").strip() or K.find_since(q) or "1h",
-        "flows": [], "path": [], "namespaces": [], "known": [], "normal": [], "notes": ["클러스터 지식이 없다 → 트리아지만으로 본다"],
-        "created": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    rid = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    d = req_dir(c, rid)
-    with _lock:
-        while d.exists():  # 같은 초에 두 번
-            rid = (dt.datetime.strptime(rid, "%Y%m%dT%H%M%SZ") + dt.timedelta(seconds=1)).strftime("%Y%m%dT%H%M%SZ")
-            d = req_dir(c, rid)
-        d.mkdir(parents=True)
-    (d / "request.yaml").write_text(
-        "# KOA 조사 요청 (웹 화면). 분석: cluster-incident-analysis 스킬, 결과는 이 폴더 report.md\n"
-        + yaml.safe_dump(plan, allow_unicode=True, sort_keys=False, width=120))
-    if body.get("triage", True):
-        source = body.get("source") if body.get("source") in ("mcp", "kubectl") else "mcp"
-        threading.Thread(target=run_triage, args=(d, plan, source), daemon=True).start()
-    return rid
-
-
-def list_requests(cluster=None):
-    out = []
-    if not REQUESTS.is_dir():
-        return out
-    for cd in sorted(REQUESTS.iterdir()):
-        if not cd.is_dir() or (cluster and cd.name != cluster):
-            continue
-        for d in cd.iterdir():
-            if not (d.is_dir() and ID_RE.match(d.name) and (d / "request.yaml").is_file()):
-                continue
-            try:
-                p = yaml.safe_load((d / "request.yaml").read_text()) or {}
-            except yaml.YAMLError:
-                p = {}
-            st = json.loads((d / "status.json").read_text()) if (d / "status.json").is_file() else {"state": "none"}
-            out.append({"cluster": cd.name, "id": d.name, "question": p.get("request", ""), "target": p.get("target"),
-                        "symptom": p.get("symptom"), "triage": st.get("state"), "report": (d / "report.md").is_file()})
-    out.sort(key=lambda r: r["id"], reverse=True)
-    return out
-
-
-def get_request(c, rid):
-    d = req_dir(c, rid)
-    if not (d / "request.yaml").is_file():
-        raise LookupError("없는 요청")
-    plan = yaml.safe_load((d / "request.yaml").read_text()) or {}
-    read = lambda n: (d / n).read_text() if (d / n).is_file() else None  # noqa: E731
-    st = json.loads(read("status.json")) if read("status.json") else {"state": "none"}
-    return {"cluster": c, "id": rid, "plan": plan, "plan_text": K.plan_text(plan), "triage": st,
-            "triage_text": read("triage.txt"), "report": read("report.md"), "prompt": chat_prompt(d), "path": rel(d)}
-
-
-# ---------- 보고서 (마크다운) ----------
-# 도구가 만든 md 를 그대로 읽어 화면에 보낸다. 화면이 마크다운을 그린다 (koa/web/md.js).
-#   탐색      <결과>/<클러스터>.report.md                  (discover.py)
-#   트리아지  <결과>/<클러스터>.triage/<시각>.md            (triage.py, 예전 결과는 .json 에서 그 자리에서 만든다)
-#   조사 결과 local/requests/<클러스터>/<시각>/report.md   (KOA 가 분석 후 씀)
-REPORT_KINDS = {"discover": "탐색", "triage": "트리아지", "analysis": "조사 결과"}
-
-
-def _md_title(md, default):
-    for ln in md.splitlines():
-        if ln.startswith("# "):
-            return ln[2:].strip()
-    return default
-
-
-def _md_summary(md):
-    """제목 다음 첫 글 줄 (인용 > 기호·굵게 빼고)."""
-    seen = False
-    for ln in md.splitlines():
-        if ln.startswith("# "):
-            seen = True
-            continue
-        s = ln.strip().lstrip(">").strip().replace("**", "").replace("`", "")
-        if seen and s and not s.startswith(("|", "#")):
-            return s[:160]
-    return ""
-
-
-def _iso(ts):
-    try:
-        return dt.datetime.strptime(ts, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%dT%H:%M:%SZ")
-    except ValueError:
-        return None
-
-
-def _discover_files(c):
-    if not CLUSTERS.is_dir():
-        return []
-    return [f for f in [CLUSTERS / ("%s.report.md" % c)] + sorted(CLUSTERS.glob("*@%s.report.md" % c)) if f.is_file()]
-
-
-def _triage_md(f):
-    """트리아지 결과 하나의 md. .md 가 없으면(예전 결과) .json 에서 같은 모양으로 만든다 (파일은 쓰지 않는다)."""
-    md = f.with_suffix(".md")
-    if md.is_file():
-        return md.read_text()
-    import triage as T  # 무겁지 않지만 보고서 볼 때만 쓴다
-    return T.render_result(json.loads(f.read_text()))
-
-
-def list_reports(c):
-    K.cluster_dir(c)  # 이름 검사
-    out = []
-    for f in _discover_files(c):
-        md = f.read_text()
-        out.append({"kind": "discover", "id": f.name[:-len(".report.md")], "title": _md_title(md, "탐색 결과"),
-                    "summary": _md_summary(md), "at": dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "path": rel(f)})
-    tdir = CLUSTERS / ("%s.triage" % c)
-    if tdir.is_dir():
-        ids = sorted({p.stem for p in tdir.iterdir() if p.suffix in (".json", ".md") and ID_RE.match(p.stem)}, reverse=True)
-        for rid in ids:
-            try:
-                md = _triage_md(tdir / (rid + ".json")) if (tdir / (rid + ".json")).is_file() else (tdir / (rid + ".md")).read_text()
-            except (OSError, ValueError, KeyError, TypeError):
-                continue
-            n = re.search(r"이상 (\d+)건", md)
-            w = re.search(r"· 최근 (\S+) ·", md)
-            out.append({"kind": "triage", "id": rid, "title": "트리아지 · 최근 %s" % w.group(1) if w else _md_title(md, "트리아지"),
-                        "summary": _md_summary(md), "at": _iso(rid), "findings": int(n.group(1)) if n else None,
-                        "path": rel(tdir / (rid + ".md"))})
-    rdir = req_dir(c)
-    if rdir.is_dir():
-        for d in sorted(rdir.iterdir(), reverse=True):
-            f = d / "report.md"
-            if not (ID_RE.match(d.name) and f.is_file()):
-                continue
-            md = f.read_text()
-            try:
-                q = (yaml.safe_load((d / "request.yaml").read_text()) or {}).get("request", "") if (d / "request.yaml").is_file() else ""
-            except yaml.YAMLError:
-                q = ""
-            out.append({"kind": "analysis", "id": d.name, "title": _md_title(md, q or "조사 결과"), "summary": q or _md_summary(md),
-                        "at": _iso(d.name), "path": rel(f)})
-    out.sort(key=lambda r: r.get("at") or "", reverse=True)
-    return out
-
-
-def get_report(c, kind, rid):
-    K.cluster_dir(c)
-    if kind == "discover":
-        f = next((x for x in _discover_files(c) if x.name[:-len(".report.md")] == rid), None)
-        if not f:
-            raise LookupError("탐색 보고서가 없다")
-        return {"kind": kind, "id": rid, "md": f.read_text(), "path": rel(f)}
-    if not ID_RE.match(rid or ""):
-        raise ValueError("id 형식이 아니다")
-    if kind == "triage":
-        tdir = CLUSTERS / ("%s.triage" % c)
-        j, m = tdir / (rid + ".json"), tdir / (rid + ".md")
-        if not (j.is_file() or m.is_file()):
-            raise LookupError("트리아지 결과가 없다")
-        return {"kind": kind, "id": rid, "md": _triage_md(j) if j.is_file() else m.read_text(),
-                "path": rel(m if m.is_file() else j), "json": rel(j) if j.is_file() else None}
-    if kind == "analysis":
-        f = req_dir(c, rid) / "report.md"
-        if not f.is_file():
-            raise LookupError("조사 결과가 없다")
-        return {"kind": kind, "id": rid, "md": f.read_text(), "path": rel(f)}
-    raise ValueError("보고서 종류: %s" % ", ".join(REPORT_KINDS))
-
-
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
@@ -438,12 +167,9 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("%s\n" % (fmt % args))
 
     def _host_ok(self):
-        # 기본(로컬 전용)이면 DNS 리바인딩 막기: 이 컴퓨터 주소로 들어온 요청만.
-        # --host 0.0.0.0 으로 열면 외부 접속을 허용하므로 Host 가드를 푼다 (인증 없음 — 사용자가 위험 인지하고 여는 경우).
+        # 로컬 전용이면 DNS 리바인딩 막기: 이 컴퓨터 주소로 들어온 요청만.
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
-        if host in ("127.0.0.1", "localhost", "[::1]"):
-            return True
-        return _REMOTE
+        return host in ("127.0.0.1", "localhost", "[::1]") or _REMOTE
 
     def _send(self, code, obj=None, ctype="application/json; charset=utf-8", raw=None):
         data = raw if raw is not None else json.dumps(obj, ensure_ascii=False, default=str).encode()
@@ -458,9 +184,7 @@ class Handler(BaseHTTPRequestHandler):
     def _route(self, method):
         if not self._host_ok():
             return self._send(403, {"error": "localhost 로만 연다"})
-        u = urlparse(self.path)
-        parts = [p for p in u.path.split("/") if p]
-        qs = parse_qs(u.query)
+        parts = [p for p in urlparse(self.path).path.split("/") if p]
         body = {}
         if method == "POST":
             # 다른 사이트의 폼 전송 막기: 사용자 지정 헤더는 같은 출처 fetch 만 붙일 수 있다
@@ -471,16 +195,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method == "GET" and parts == []:
                 return self._send(200, raw=HTML.read_bytes(), ctype="text/html; charset=utf-8")
-            if method == "GET" and len(parts) == 2 and parts[0] == "static" and parts[1] in STATIC:
-                ctype, f = STATIC[parts[1]]
-                return self._send(200, raw=f.read_bytes(), ctype=ctype)
             if parts[:1] != ["api"]:
                 return self._send(404, {"error": "not found"})
             p = parts[1:]
             if method == "GET" and p == ["clusters"]:
-                return self._send(200, dict(cluster_info(), knowledge=rel(K.KNOWLEDGE), symptoms=K.SYMPTOM_NAMES))
+                return self._send(200, dict(cluster_info(), knowledge=rel(K.KNOWLEDGE)))
             if method == "POST" and p == ["clusters"]:
-                K.init(body.get("name") or "", bool(body.get("example")))
+                K.init(body.get("name") or "")
                 return self._send(200, {"ok": True})
             if method == "GET" and len(p) == 2 and p[0] == "workloads":
                 return self._send(200, workloads(p[1]))
@@ -491,18 +212,19 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "GET" and p[2:] == ["candidates"]:
                     return self._send(200, {"candidates": K.discover_candidates(c)})
                 if method == "POST" and p[2:] == ["add_components"]:
-                    added, check = K.add_discovered_components(c, body.get("workloads") or [])
-                    return self._send(200, {"added": added, "check": [{"level": lv, "msg": m} for lv, m in check]})
-                if method == "POST" and p[2:] == ["delete_components"]:
-                    removed, comps = K.delete_discovered_components(c, body.get("names") or [])
-                    return self._send(200, {"removed": removed, "components": list(comps)})
+                    with _lock:
+                        added, chk = K.add_discovered_components(c, body.get("workloads") or [])
+                    return self._send(200, {"added": added, "check": checks(chk)})
                 if method == "POST" and p[2:] == ["shards"]:
-                    saved = K.save_shards(c, body)
-                    return self._send(200, {"saved": saved, "check": [{"level": lv, "msg": m} for lv, m in saved["check"]]})
-                if method == "POST" and p[2:] == ["preview"]:
-                    return self._send(200, preview_text(c, body))
-                if method == "POST" and p[2:] == ["text"]:
-                    return self._send(200, save_text(c, body))
+                    with _lock:
+                        saved = K.save_shards(c, body)
+                    return self._send(200, {"check": checks(saved["check"])})
+                if method == "POST" and len(p) == 5 and p[2] == "suggestions" and p[4] in ("accept", "dismiss"):
+                    if not SID_RE.match(p[3]):
+                        raise ValueError("제안 id 형식이 아니다")
+                    with _lock:
+                        r = K.resolve_suggestion(c, p[3], p[4] == "accept")
+                    return self._send(200, {"result": K.additions_text(r) if r else None})
                 if method == "POST" and p[2:] == ["incidents", "preview"]:
                     return self._send(200, {"meta": incident_preview(c, body)})
                 if method == "POST" and p[2:] == ["incidents"]:
@@ -510,23 +232,6 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "POST" and p[2:3] == ["incidents"] and p[4:] == ["delete"]:
                     delete_incident(c, p[3])
                     return self._send(200, {"ok": True})
-            if method == "POST" and p == ["plan"]:
-                c = body.get("cluster") or ""
-                q = (body.get("question") or "").strip()
-                if not q or not K.cluster_dir(c).is_dir():
-                    return self._send(200, {"plan": None})
-                pl = K.plan(c, q, (body.get("since") or "").strip() or None, force_target=(body.get("target") or "").strip() or None)
-                return self._send(200, {"plan": pl, "text": K.plan_text(pl)})
-            if p == ["requests"]:
-                if method == "GET":
-                    return self._send(200, {"requests": list_requests((qs.get("cluster") or [None])[0])})
-                return self._send(200, {"id": create_request(body)})
-            if method == "GET" and len(p) == 3 and p[0] == "requests":
-                return self._send(200, get_request(p[1], p[2]))
-            if method == "GET" and len(p) == 2 and p[0] == "reports":
-                return self._send(200, {"reports": list_reports(p[1]), "kinds": REPORT_KINDS})
-            if method == "GET" and len(p) == 4 and p[0] == "reports":
-                return self._send(200, get_report(p[1], p[2], p[3]))
             return self._send(404, {"error": "not found"})
         except LookupError as x:
             return self._send(404, {"error": str(x)})
@@ -545,13 +250,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1",
-                    help="바인딩 주소 (기본 127.0.0.1 로컬 전용). 0.0.0.0 으로 열면 외부 접속 허용 — 인증이 없어 위험, X-KOA 헤더 가드만 남는다")
+                    help="바인딩 주소 (기본 127.0.0.1 로컬 전용). 0.0.0.0 은 인증 없이 외부 접속을 허용한다")
     a = ap.parse_args()
     if a.host != "127.0.0.1":
         _REMOTE = True
-        print("⚠ 경고: %s 으로 열어 외부 접속을 허용했습니다. 인증이 없어 사내망 누구나 지식/쓰기 가능." % a.host)
+        print("⚠ 경고: %s 으로 열어 외부 접속을 허용했습니다. 인증이 없어 누구나 지식을 고칠 수 있습니다." % a.host)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print("KOA 웹: http://%s:%d  (지식 %s · 요청 %s)  Ctrl+C 로 끝" % (a.host, a.port, rel(K.KNOWLEDGE), rel(REQUESTS)))
+    print("KOA 웹: http://%s:%d  (지식 %s)  Ctrl+C 로 끝" % (a.host, a.port, rel(K.KNOWLEDGE)))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

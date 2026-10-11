@@ -98,14 +98,15 @@ not in ad-hoc chat text.
 ## Building cluster knowledge (flows) — any cluster, config + logs only
 
 When the user asks for the request flow ("요청이 지나는 길 만들어줘"), use the tool, not ad-hoc scripts:
-1. `python3 koa/flowmap.py --shards "$HERMES_HOME/cache/scratch/<c>-flows.json"` (`--ns a,b` to narrow,
+1. `python3 koa/flowmap.py` (`--ns a,b` to narrow,
    `--source kubectl` before MCP registration). It only does get/list and pod-log reads — no requests to apps,
    no connection tests, no DNS, no exec/port-forward, no Secret reads; its first line prints the call counts.
    Method and verdict rules: `docs/koa-flowmap.md`.
 2. Show the user the flow table + evidence table + "확인 못 한 것" (verdict per hop: 설정+로그 / 설정 / 로그 /
    허용규칙+로그 / 요청ID / 허용규칙). Queue produce/consume direction is inferred — say so.
-3. `python3 koa/knowledge.py merge <c> <file>` previews; add only what the user picks with `--pick 1,3 --apply`.
-   Merge never edits or deletes human-written components/flows/normal notes; it backs up `flows.yaml.bak`.
+3. Flows/components not yet in the knowledge are saved as suggestions (never written to knowledge directly).
+   The user picks them in the web UI (클러스터 지식 → 제안) or in chat → `knowledge.py accept <c> <id>`.
+   Accepting only adds; it never edits or deletes human-written entries and backs up `flows.yaml.bak`.
 4. Deeper confirmation of an inferred hop (shared store, old traffic) goes through the log-store MCP
    (OpenSearch/Loki) — still reads only. Normal patterns (`normal`) remain a human/analysis step.
 - Never hard-code a cluster's names, namespaces or local paths into code. If flowmap misses a hop, fix the
@@ -140,7 +141,7 @@ When the user asks for the request flow ("요청이 지나는 길 만들어줘")
 - macOS system python is 3.9 — keep KOA scripts free of 3.10+ syntax.
 - Starting `koa/web.py` from a Hermes background terminal: `python3` there can resolve to Hermes' bundled
   Python (no PyYAML) → `ModuleNotFoundError: yaml`. Launch with `/usr/bin/python3 koa/web.py` and export
-  `KUBECONFIG=~/.kube/hermes-readonly.yaml` (web.py runs triage with `sys.executable`).
+  `KUBECONFIG=~/.kube/hermes-readonly.yaml` (the "클러스터에서 고르기" workload list uses kubectl).
 - flowmap: without a discovery profile, kinds come from catalog image rules; run `discover.py` first for better
   ingress/log-shipper detection. MCP `kubectl_get` errors come back as a JSON blob — use `errtext()` to show them.
 - `koa/query.py --call` cuts output at 6000 chars (`--max`); pass `--max 0` before parsing JSON. Read

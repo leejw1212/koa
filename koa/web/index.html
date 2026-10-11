@@ -159,43 +159,6 @@ details[open] > summary::before { transform: rotate(90deg); }
 .kpick { border-radius: 16px; border: 1px solid var(--edge-soft); background: var(--glass-soft); padding: 12px 14px; margin: 8px 0 12px; max-height: 340px; overflow: auto; }
 .kpick label { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; cursor: pointer; }
 .kempty { color: var(--faint); font-size: 13px; padding: 14px; text-align: center; border: 1px dashed var(--edge-soft); border-radius: 14px; }
-/* 보고서 (마크다운) */
-.rsplit { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; align-items: start; }
-@media (max-width: 900px) { .rsplit { grid-template-columns: 1fr; } }
-.rfilter { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 10px; }
-.rlist .item { align-items: flex-start; }
-.rlist .ttl { font-weight: 600; font-size: 13.5px; line-height: 1.4; }
-.rlist .sum { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.rlist .when { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
-.kindtag { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-top: 2px; }
-.kindtag.triage { background: rgba(178, 106, 0, .12); color: var(--warn); }
-.kindtag.analysis { background: rgba(19, 138, 85, .12); color: var(--ok); }
-.rhead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--edge-soft); }
-.md { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
-.md > :first-child { margin-top: 0; }
-.md h1 { font-size: 22px; margin: 0 0 10px; }
-.md h2 { font-size: 17px; margin: 26px 0 10px; padding-top: 14px; border-top: 1px solid var(--edge-soft); }
-.md h3 { font-size: 15px; margin: 20px 0 8px; }
-.md h4 { font-size: 14px; margin: 16px 0 6px; color: var(--muted); }
-.md p { margin: 8px 0; }
-.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
-.md li { margin: 3px 0; }
-.md li > p { margin: 2px 0; }
-.md blockquote { margin: 10px 0; padding: 6px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 12px 12px 0; color: var(--muted); }
-.md blockquote p { margin: 4px 0; }
-.md hr { border: 0; border-top: 1px solid var(--edge-soft); margin: 18px 0; }
-.md a { color: var(--accent); }
-.md pre { margin: 10px 0; }
-.md pre code { background: none; padding: 0; font-size: inherit; }
-.md-table { overflow-x: auto; margin: 10px 0; border-radius: 14px; border: 1px solid var(--edge-soft); background: var(--glass-soft); }
-.md table { border-collapse: collapse; width: 100%; font-size: 13px; }
-.md th, .md td { padding: 7px 11px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--edge-soft);
-  overflow-wrap: break-word; word-break: keep-all; min-width: 3.5em; }
-.md td:has(code), .md td:last-child { min-width: 9em; }
-.md th { font-size: 12px; color: var(--muted); font-weight: 700; background: var(--glass-soft); white-space: nowrap; }
-.md tbody tr:last-child td { border-bottom: 0; }
-.md tbody tr:hover td { background: var(--glass-strong); }
-.md td code { white-space: normal; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -203,10 +166,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   <div class="bar glass">
     <span class="logo">KOA</span>
     <nav class="seg" id="tabs">
-      <button data-tab="ask" class="on">조사 요청</button>
-      <button data-tab="results">결과</button>
-      <button data-tab="reports">보고서</button>
-      <button data-tab="knowledge">클러스터 지식</button>
+      <button data-tab="knowledge" class="on">클러스터 지식</button>
       <button data-tab="incidents">과거 이슈</button>
     </nav>
     <span class="spacer"></span>
@@ -221,55 +181,15 @@ details[open] > summary::before { transform: rotate(90deg); }
 
 <section class="card glass" id="register" hidden>
   <h1>클러스터 지식 시작하기</h1>
-  <p class="hint">입력할 것은 <b>클러스터 이름</b> 하나입니다. KOA 는 이 이름으로 지식·트리아지·조사 요청을 묶습니다. 이름은 탐색 결과나 읽기 전용 kubeconfig 컨텍스트에서 <code>-readonly</code> 를 뺀 것과 같아야 트리아지 결과와 맞습니다.</p>
+  <p class="hint">입력할 것은 <b>클러스터 이름</b> 하나입니다. 읽기 전용 kubeconfig 컨텍스트에서 <code>-readonly</code> 를 뺀 이름과 같게 두면 KOA 채팅이 이 지식을 찾습니다.</p>
   <div id="regCands"></div>
   <div class="row" style="margin-top:14px">
     <input id="regName" style="max-width:240px" placeholder="직접 입력 (예: prod-a)">
     <button class="btn" id="regGo">시작</button>
-    <label class="row faint" style="gap:6px"><input type="checkbox" id="regExample"> 예시(order-api·rabbitmq 등)로 채워서 연습</label>
   </div>
 </section>
 
-<div id="tab-ask">
-  <section class="card glass hero">
-    <h1>무엇이 문제인가요?</h1>
-    <p class="hint">평소 말로 쓰면 됩니다. 쓰는 동안 KOA 가 대상·증상·확인 순서를 정리해 아래에 보여 줍니다.</p>
-    <textarea id="q" rows="3" placeholder="rmq 소비가 안 되는데 어디가 문제야?"></textarea>
-    <div class="chips" id="examples" style="margin-top:10px"></div>
-    <div class="row" style="margin-top:14px">
-      <span class="faint">기간</span><input id="since" style="width:96px" placeholder="자동">
-      <select id="source" style="width:auto"><option value="mcp">kubernetes MCP</option><option value="kubectl">읽기 전용 kubectl</option></select>
-      <label class="row faint" style="gap:6px"><input type="checkbox" id="runTriage" checked> 트리아지 바로 실행</label>
-      <span class="grow"></span>
-      <button class="btn primary" id="submit">조사 요청 보내기</button>
-    </div>
-  </section>
-  <section class="card glass">
-    <div class="row"><h2 class="grow">조사 계획</h2><span class="faint">틀리면 질문을 고치거나 클러스터 지식에 별명을 적어 주세요</span></div>
-    <div id="planPreview" class="empty">질문을 쓰면 여기에 나옵니다.</div>
-  </section>
-</div>
-
-<div id="tab-results" hidden>
-  <div class="split">
-    <section class="card glass"><h2>조사 요청</h2><p class="hint">KOA 채팅에 한 줄을 붙여 넣으면 분석해서 결과를 여기에 씁니다.</p><div class="list" id="resultList"></div></section>
-    <div id="resultDetail"><section class="card glass empty">요청을 고르세요.</section></div>
-  </div>
-</div>
-
-<div id="tab-reports" hidden>
-  <div class="rsplit">
-    <section class="card glass">
-      <div class="row"><h2 class="grow">보고서</h2><button class="btn ghost" id="rReload" title="다시 읽기">↻</button></div>
-      <p class="hint">KOA 도구가 쓴 마크다운(.md) 파일을 그대로 읽어 보여 줍니다. 채팅이나 터미널에서 새로 돌리면 여기에 생깁니다.</p>
-      <div class="rfilter" id="rFilter"></div>
-      <div class="list rlist" id="rList"></div>
-    </section>
-    <div id="rDetail"><section class="card glass empty">보고서를 고르세요.</section></div>
-  </div>
-</div>
-
-<div id="tab-knowledge" hidden>
+<div id="tab-knowledge">
   <section class="card glass">
     <div class="row">
       <div class="grow">
@@ -280,6 +200,12 @@ details[open] > summary::before { transform: rotate(90deg); }
       <button class="btn primary" id="saveShards">저장</button>
     </div>
     <div id="kChecks" style="margin-top:10px"></div>
+  </section>
+
+  <section class="card glass" id="kSugCard" hidden>
+    <div class="row khdr"><h2 class="grow">제안 <span class="faint" id="kSugCount"></span></h2></div>
+    <p class="hint">흐름 찾기(flowmap)나 분석이 찾았지만 아직 지식에 넣지 않은 것입니다. 맞는 것만 더하세요. 버린 것은 다시 제안하지 않습니다.</p>
+    <div id="kSug" class="klist"></div>
   </section>
 
   <section class="card glass">
@@ -317,7 +243,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   <div class="split">
     <section class="card glass">
       <div class="row"><h2 class="grow">과거 이슈</h2><button class="btn" id="newInc">＋ 새 이슈</button></div>
-      <p class="hint">있었던 일을 그대로 적으면 됩니다. 비슷한 요청이 오면 먼저 확인합니다.</p>
+      <p class="hint">있었던 일을 그대로 적으면 됩니다. 같은 구성요소를 물으면 KOA 가 먼저 확인합니다. 분석이 끝나면 KOA 가 OK 를 받고 여기에 기록합니다.</p>
       <div class="list" id="incList"></div>
     </section>
     <section class="card glass" id="incForm" hidden>
@@ -325,7 +251,7 @@ details[open] > summary::before { transform: rotate(90deg); }
         <button class="btn danger ghost" id="delInc">삭제</button><button class="btn primary" id="saveInc">저장</button></div>
       <textarea id="incText" rows="10" placeholder="2026-08-14 rmq 소비가 멈춤. 원인: rabbitmq PVC 90% → 디스크 알람으로 생산자 차단.&#10;rabbitmq 로그에 &quot;disk resource limit alarm set&quot; 이 찍혔다. PVC 늘려서 해결."></textarea>
       <div class="sec"><div class="label">KOA 가 이해한 것</div><div id="incMeta" class="chips"></div></div>
-      <p class="faint" style="margin-top:10px">날짜, 증상, 관련 구성요소, 따옴표 안 로그 문구, "원인:" 뒤 문장을 알아서 뽑습니다.</p>
+      <p class="faint" style="margin-top:10px">날짜, 관련 구성요소, 따옴표 안 로그 문구, "원인:" 뒤 문장을 알아서 뽑습니다.</p>
     </section>
   </div>
 </div>
@@ -335,16 +261,12 @@ details[open] > summary::before { transform: rotate(90deg); }
 <datalist id="compNames"></datalist>
 <datalist id="workloadNames"></datalist>
 
-<script src="/static/md.js"></script>
 <script>
 "use strict";
 const $ = (s, el) => (el || document).querySelector(s);
 const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const S = { cluster: null, k: null, tab: "ask", poll: null, cands: [], register: false, inc: null, dirty: false };
-const SYM = { "queue-backlog": "큐 적체·소비 안 됨", latency: "느림·타임아웃", errors: "오류·5xx", crash: "재시작·죽음", pending: "파드가 안 뜸", "log-pipeline": "로그 수집", "external-dependency": "외부 의존" };
-const EXAMPLES = ["rmq 소비가 안 되는데 어디가 문제야?", "주문 API 가 30분 전부터 느려", "결제 쪽 5xx 가 늘었어", "워커가 계속 재시작해"];
-
+const S = { cluster: null, k: null, tab: "knowledge", cands: [], register: false, inc: null, dirty: false };
 function toast(msg, ms) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms || 2200); }
 async function api(path, body) {
   const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-KOA": "1" }, body: JSON.stringify(body) };
@@ -359,22 +281,20 @@ const debounce = (fn, ms) => { let h; return (...a) => { clearTimeout(h); h = se
 
 // ---------- 탭 / 클러스터 ----------
 function showTab(t) {
+  if (!["knowledge", "incidents"].includes(t)) t = "knowledge";
   S.tab = t; store.set("tab", t);
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
-  ["ask", "results", "reports", "knowledge", "incidents"].forEach(x => $("#tab-" + x).hidden = x !== t);
-  const need = ((t === "knowledge" || t === "incidents") && !S.k) || (t === "ask" && !S.cluster) || S.register;
+  ["knowledge", "incidents"].forEach(x => $("#tab-" + x).hidden = x !== t);
+  const need = !S.k || S.register;
   $("#register").hidden = !need;
   if (need) {
-    if (t !== "ask") $("#tab-" + t).hidden = true;
+    $("#tab-" + t).hidden = true;
     $("#regName").value = S.cluster && !S.k ? S.cluster : "";
     $("#regCands").innerHTML = S.cands.length
       ? '<div class="row">' + S.cands.map(c => `<button class="btn primary" data-reg="${esc(c)}">${esc(c)} 으로 시작</button>`).join("") + '<span class="faint">이 컴퓨터에서 찾은 클러스터</span></div>'
       : '<p class="faint">탐색한 클러스터를 찾지 못했습니다. KOA 채팅에서 "클러스터 확인하고 MCP 세팅해줘" 로 탐색하면 여기에 나옵니다.</p>';
     $$("#regCands [data-reg]").forEach(b => b.onclick = () => register(b.dataset.reg));
   }
-  clearInterval(S.poll);
-  if (t === "results") loadResults();
-  if (t === "reports") loadReports();
 }
 $$("#tabs button").forEach(b => b.onclick = () => { S.register = false; showTab(b.dataset.tab); });
 
@@ -384,149 +304,25 @@ async function loadClusters(select) {
   const all = j.clusters.concat(S.cands), sel = $("#cluster");
   sel.innerHTML = j.clusters.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")
     + S.cands.map(c => `<option value="${esc(c)}">${esc(c)} · 지식 없음</option>`).join("") || '<option value="">클러스터 없음</option>';
-  const want = select || j.auto_onboarded || store.get("cluster");
+  const want = select || store.get("cluster") || j.context;
   if (want && all.includes(want)) sel.value = want;
   await setCluster(sel.value || null);
-  if (j.auto_onboarded) toast("클러스터를 자동으로 연결했습니다: " + j.auto_onboarded, 3500);
 }
 $("#cluster").onchange = e => { if (S.dirty && !confirm("저장하지 않은 설명이 있습니다. 바꿀까요?")) { e.target.value = S.cluster; return; } setCluster(e.target.value); };
 $("#newCluster").onclick = () => { S.register = true; showTab(S.tab); };
 $("#regGo").onclick = () => { const n = $("#regName").value.trim(); n ? register(n) : toast("이름을 입력하세요"); };
 async function register(name) {
   try {
-    await api("clusters", { name, example: $("#regExample").checked });
-    S.register = false; toast("만들었습니다. 클러스터를 자유롭게 설명해 주세요", 3000);
+    await api("clusters", { name });
+    S.register = false; toast("만들었습니다. 구성요소를 클러스터에서 고르세요", 3000);
     await loadClusters(name); showTab("knowledge"); $("#kPick").hidden = false;
   } catch (e) { toast(e.message, 4000); }
 }
 async function setCluster(c) {
   S.cluster = c; S.k = null; S.dirty = false;
   if (c) { store.set("cluster", c); try { S.k = await api(kpath(c)); } catch (e) { S.k = null; } }
-  renderKnowledge(); renderIncidents(); previewPlan(); S.rOpen = null; showTab(S.tab);
+  renderKnowledge(); renderIncidents(); showTab(S.tab);
 }
-
-// ---------- 조사 요청 ----------
-$("#examples").innerHTML = EXAMPLES.map(x => `<span class="chip click">${esc(x)}</span>`).join("");
-$$("#examples .chip").forEach(c => c.onclick = () => { $("#q").value = c.textContent; previewPlan(); $("#q").focus(); });
-
-function planHTML(p) {
-  if (!p) return "";
-  let target = p.target || "";
-  let h = "";
-  if (p.candidates && p.candidates.length) {
-    // 대상이 여러 개로 애매할 때 사용자가 직접 고르는 UI
-    const sel = window._KOA_cand || p.candidates[0];
-    h += `<div class="sec"><div class="label">대상을 직접 선택 (상황마다 다릅니다)</div><div class="chips">` +
-      p.candidates.map(c => `<span class="chip ${c === sel ? "accent" : "click"}" data-t="${esc(c)}">${esc(c)}</span>`).join("") + `</div>
-      <div class="msg faint">선택하면 아래 확인 순서가 그 대상 기준으로 갱신됩니다.</div></div>`;
-    target = sel;
-  }
-  const chips = [
-    `<span class="chip accent">대상 · ${esc(p.target || target || "트리아지로 정함")}</span>`,
-    `<span class="chip">${esc(SYM[p.symptom] || "증상 미정")}</span>`,
-    `<span class="chip">최근 ${esc(p.since)}</span>`,
-  ].concat((p.flows || []).map(f => `<span class="chip">흐름 ${esc(f)}</span>`)).join("");
-  h += `<div class="chips">${chips}</div>`;
-  if (p.path && p.path.length) h += `<div class="sec"><div class="label">확인 순서</div><ol class="steps">` + p.path.map((x, i) =>
-    `<li><span class="num">${i + 1}</span><div><span class="name">${esc(x.component)}</span> <span class="wl">${esc(x.workload)}</span><div class="why">${esc(x.why)}</div></div></li>`).join("") + "</ol></div>";
-  if (p.known && p.known.length) h += `<div class="sec"><div class="label">비슷한 과거 이슈 · 먼저 확인</div>` + p.known.map(k =>
-    `<div class="comp" style="margin-bottom:6px"><b>${esc(k.date)}</b> ${esc(k.cause || k.file)}<div class="chips" style="margin-top:6px">${(k.signature || []).map(s => `<span class="chip warn">"${esc(s)}"</span>`).join("")}</div></div>`).join("") + "</div>";
-  if (p.normal && p.normal.length) h += `<div class="sec"><div class="label">정상 패턴</div>` + p.normal.map(n => `<div class="msg">· <b>${esc(n.component)}</b> ${esc(n.note)}</div>`).join("") + "</div>";
-  if (p.notes && p.notes.length) h += `<div class="sec">` + p.notes.map(n => `<div class="msg faint">${esc(n)}</div>`).join("") + "</div>";
-  return h;
-}
-const previewPlan = debounce(async () => {
-  const q = $("#q").value.trim(), box = $("#planPreview");
-  if (!q) { box.className = "empty"; box.textContent = "질문을 쓰면 여기에 나옵니다."; return; }
-  if (!S.k) { box.className = "empty"; box.textContent = "이 클러스터에는 지식이 없어 트리아지만으로 봅니다."; return; }
-  try { const j = await api("plan", { cluster: S.cluster, question: q, since: $("#since").value, target: window._KOA_cand || "" }); box.className = ""; box.innerHTML = planHTML(j.plan);
-    $$("#planPreview .chip[data-t]").forEach(c => c.onclick = () => { window._KOA_cand = c.dataset.t; previewPlan(); });
-  }
-  catch (e) { box.textContent = e.message; }
-}, 250);
-$("#q").addEventListener("input", () => { window._KOA_cand = null; previewPlan(); });
-$("#since").addEventListener("input", previewPlan);
-$("#submit").onclick = async () => {
-  const q = $("#q").value.trim();
-  if (!q) return toast("질문을 써 주세요");
-  if (!S.cluster) return toast("먼저 클러스터를 정하세요");
-  try {
-    const j = await api("requests", { cluster: S.cluster, question: q, since: $("#since").value, triage: $("#runTriage").checked, source: $("#source").value, target: window._KOA_cand || "" });
-    $("#q").value = ""; previewPlan(); showTab("results"); openResult(S.cluster, j.id);
-  } catch (e) { toast(e.message, 4000); }
-};
-
-// ---------- 결과 ----------
-const stateChip = s => ({ running: '<span class="chip warn">트리아지 중</span>', done: '<span class="chip ok">트리아지 완료</span>', failed: '<span class="chip err">트리아지 실패</span>' }[s] || "");
-function fmtId(id) { const m = id.match(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/); return m ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6])).toLocaleString() : id; }
-async function loadResults() {
-  const j = await api("requests" + (S.cluster ? "?cluster=" + encodeURIComponent(S.cluster) : ""));
-  $("#resultList").innerHTML = j.requests.map(r => `<div class="item" data-c="${esc(r.cluster)}" data-id="${esc(r.id)}">
-      <div class="grow"><div style="font-weight:600">${esc(r.question)}</div><div class="faint">${esc(fmtId(r.id))}</div></div>
-      ${r.report ? '<span class="chip accent">분석 결과</span>' : ""}${stateChip(r.triage)}</div>`).join("")
-    || '<div class="empty">아직 없습니다. 조사 요청에서 시작하세요.</div>';
-  $$("#resultList .item").forEach(el => { el.onclick = () => openResult(el.dataset.c, el.dataset.id); el.classList.toggle("on", el.dataset.id === S.open); });
-}
-async function openResult(c, id) {
-  clearInterval(S.poll); S.open = id; S.lastState = null;
-  const draw = async () => {
-    let r; try { r = await api(`requests/${encodeURIComponent(c)}/${encodeURIComponent(id)}`); } catch (e) { return toast(e.message); }
-    $("#resultDetail").innerHTML = `
-      <section class="card glass"><h1 style="font-size:20px">${esc(r.plan.request)}</h1><p class="faint">${esc(fmtId(r.id))} · ${esc(r.path)}</p>
-        <div class="label" style="margin-top:12px">KOA 채팅에 붙여 넣으세요</div>
-        <div class="row"><pre class="grow">${esc(r.prompt)}</pre><button class="btn primary" id="copy">복사</button></div></section>
-      <section class="card glass"><h2>분석 결과</h2>${r.report ? `<div class="md" style="margin-top:8px">${KoaMD.render(r.report)}</div>` : '<p class="muted">아직 없습니다. 위 한 줄을 KOA 채팅에 붙여 넣으면 분석을 끝내고 여기에 씁니다.</p>'}</section>
-      <section class="card glass"><h2>조사 계획</h2>${planHTML(r.plan)}</section>
-      <section class="card glass"><div class="row"><h2 class="grow">트리아지</h2>${stateChip(r.triage.state)}</div>
-        ${r.triage_text ? `<details ${r.triage.state === "failed" ? "open" : ""} style="margin-top:8px"><summary>출력 보기</summary><div class="md" style="margin-top:8px">${r.triage.state === "failed" ? `<pre>${esc(r.triage_text)}</pre>` : KoaMD.render(r.triage_text)}</div></details>` : r.triage.state === "running" ? '<p class="muted">kubernetes MCP 로 훑는 중…</p>' : '<p class="muted">실행하지 않았습니다.</p>'}</section>`;
-    $("#copy").onclick = () => navigator.clipboard.writeText(r.prompt).then(() => toast("복사했습니다"), () => toast("복사 실패: 직접 선택하세요"));
-    if (r.triage.state !== S.lastState) { S.lastState = r.triage.state; loadResults(); }
-    if (r.triage.state !== "running" && r.report) clearInterval(S.poll);
-  };
-  await draw();
-  S.poll = setInterval(draw, 3000);
-}
-
-// ---------- 보고서 (도구가 쓴 마크다운) ----------
-const RKIND = { discover: "탐색", triage: "트리아지", analysis: "조사 결과" };
-S.rKind = store.get("rKind") || "";
-function fmtAt(iso) { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(); }
-async function loadReports() {
-  if (!S.cluster) { $("#rList").innerHTML = '<div class="empty">클러스터를 먼저 고르세요.</div>'; return; }
-  let j; try { j = await api("reports/" + encodeURIComponent(S.cluster)); } catch (e) { $("#rList").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-  S.reports = j.reports || [];
-  const cnt = k => S.reports.filter(r => !k || r.kind === k).length;
-  $("#rFilter").innerHTML = [["", "전체"]].concat(Object.entries(RKIND)).map(([k, l]) =>
-    `<span class="chip click ${S.rKind === k ? "accent" : ""}" data-k="${k}">${l} ${cnt(k)}</span>`).join("");
-  $$("#rFilter [data-k]").forEach(c => c.onclick = () => { S.rKind = c.dataset.k; store.set("rKind", S.rKind); loadReports(); });
-  const list = S.reports.filter(r => !S.rKind || r.kind === S.rKind);
-  $("#rList").innerHTML = list.map(r => `<div class="item" data-k="${esc(r.kind)}" data-id="${esc(r.id)}">
-      <span class="kindtag ${esc(r.kind)}">${esc(RKIND[r.kind] || r.kind)}</span>
-      <div class="grow"><div class="ttl">${esc(r.title)}</div>${r.summary ? `<div class="sum">${esc(r.summary)}</div>` : ""}
-      <div class="when">${esc(fmtAt(r.at))}</div></div>${r.kind === "triage" && r.findings != null ? `<span class="chip ${r.findings ? "warn" : "ok"}" style="flex:none">이상 ${r.findings}</span>` : ""}</div>`).join("")
-    || '<div class="empty">아직 없습니다. KOA 채팅에서 "클러스터 확인해줘" 나 트리아지를 돌리면 생깁니다.</div>';
-  $$("#rList .item").forEach(el => { el.onclick = () => openReport(el.dataset.k, el.dataset.id); el.classList.toggle("on", S.rOpen === el.dataset.k + "/" + el.dataset.id); });
-  if (!S.rOpen && list.length) openReport(list[0].kind, list[0].id);
-}
-async function openReport(kind, id) {
-  S.rOpen = kind + "/" + id;
-  $$("#rList .item").forEach(el => el.classList.toggle("on", S.rOpen === el.dataset.k + "/" + el.dataset.id));
-  let r; try { r = await api(`reports/${encodeURIComponent(S.cluster)}/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`); }
-  catch (e) { $("#rDetail").innerHTML = `<section class="card glass empty">${esc(e.message)}</section>`; return; }
-  S.rRaw = false;
-  const draw = () => {
-    $("#rDetail").innerHTML = `<section class="card glass">
-      <div class="rhead"><span class="kindtag ${esc(r.kind)}">${esc(RKIND[r.kind] || r.kind)}</span>
-        <span class="faint grow" title="파일 위치">${esc(r.path)}</span>
-        <button class="btn ghost" id="rRaw">${S.rRaw ? "보기 좋게" : "md 원문"}</button>
-        <button class="btn" id="rCopy">md 복사</button></div>
-      ${S.rRaw ? `<pre>${esc(r.md)}</pre>` : `<div class="md">${KoaMD.render(r.md)}</div>`}</section>`;
-    $("#rRaw").onclick = () => { S.rRaw = !S.rRaw; draw(); };
-    $("#rCopy").onclick = () => navigator.clipboard.writeText(r.md).then(() => toast("복사했습니다"), () => toast("복사 실패"));
-  };
-  draw();
-}
-$("#rReload").onclick = () => { S.rOpen = null; loadReports(); };
 
 // ---------- 클러스터 지식 ----------
 // 상태: SH = { components: {이름: {...}}, flows: [{name, kind, nodes:[]}], normal: [{component, note}] }
@@ -537,11 +333,7 @@ const QRE = /rabbit|rmq|kafka|queue|큐|sqs|nats/i;
 const csvs = v => v.split(/[,，]/).map(s => s.trim()).filter(Boolean);
 
 function flowsToNodes(flows) {
-  return Object.entries(flows || {}).map(([name, f]) => {
-    const uniq = [];
-    (f.edges || []).forEach(e => { if (!uniq.includes(e.from)) uniq.push(e.from); if (e.to && !uniq.includes(e.to)) uniq.push(e.to); });
-    return { name, kind: f.kind || (uniq.some(n => QRE.test(n)) ? "queue" : "http"), nodes: uniq };
-  });
+  return Object.entries(flows || {}).map(([name, f]) => ({ name, kind: f.kind || ((f.nodes || []).some(n => QRE.test(n)) ? "queue" : "http"), nodes: f.nodes || [] }));
 }
 function renderKnowledge() {
   const k = S.k; if (!k) return;
@@ -555,8 +347,30 @@ function renderKnowledge() {
   SH.open = null; S.dirty = false; $("#saveState").textContent = "";
   renderChecks(k.check || []);
   renderAll();
+  renderSug();
   loadCands();
 }
+function renderSug() {
+  const list = (S.k && S.k.suggestions) || [];
+  $("#kSugCard").hidden = !list.length;
+  $("#kSugCount").textContent = list.length ? list.length + "개" : "";
+  $("#kSug").innerHTML = list.map(p => `<div class="krow"><div class="ksum" style="cursor:default;align-items:flex-start">
+      <div class="grow"><div class="nm" style="white-space:normal">${esc(p.title)}</div>
+        <div class="faint">${esc(p.source)}${p.why ? " · " + esc(p.why) : ""}</div>
+        <pre style="margin-top:6px;padding:8px 10px">${esc(p.preview)}</pre></div>
+      <button class="btn primary" data-sa="${esc(p.id)}">더하기</button><button class="btn ghost" data-sd="${esc(p.id)}">버리기</button></div></div>`).join("");
+}
+$("#kSug").addEventListener("click", async e => {
+  const b = e.target.closest("[data-sa],[data-sd]"); if (!b) return;
+  e.stopPropagation();
+  if (S.dirty && !confirm("저장하지 않은 변경이 있습니다. 버리고 제안을 처리할까요?")) return;
+  const id = b.dataset.sa || b.dataset.sd, act = b.dataset.sa ? "accept" : "dismiss";
+  try {
+    await api(`${kpath()}/suggestions/${encodeURIComponent(id)}/${act}`, {});
+    toast(act === "accept" ? "지식에 더했습니다" : "버렸습니다");
+    S.k = await api(kpath()); renderKnowledge();
+  } catch (err) { toast(err.message, 4000); }
+});
 function renderChecks(list) {
   S.checks = list;
   $("#kChecks").innerHTML = list.map(c => `<div class="msg ${c.level === "error" ? "err" : "warn"}">· ${esc(c.msg)}</div>`).join("");
@@ -693,7 +507,6 @@ async function saveShards() {
     S.k = await api(kpath()); renderKnowledge();
     $("#saveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
     toast((S.checks || []).length ? `저장했습니다 · 확인할 것 ${S.checks.length}개` : "저장했습니다", 3000);
-    previewPlan();
   } catch (e) { toast(e.message, 4000); }
 }
 $("#saveShards").onclick = saveShards;
@@ -742,7 +555,6 @@ window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault()
 function metaHTML(m) {
   const c = [];
   c.push(m.date ? `<span class="chip">${esc(String(m.date).slice(0, 10))}</span>` : '<span class="chip warn">날짜 없음 → 오늘</span>');
-  if (m.symptom) c.push(`<span class="chip accent">${esc(SYM[m.symptom] || m.symptom)}</span>`);
   (m.components || []).forEach(x => c.push(`<span class="chip">${esc(x)}</span>`));
   ((m.signature || {}).logs || []).forEach(x => c.push(`<span class="chip warn">"${esc(x)}"</span>`));
   if (m.cause) c.push(`<span class="chip">원인 · ${esc(m.cause)}</span>`);
@@ -752,7 +564,7 @@ function renderIncidents() {
   const k = S.k; if (!k) return;
   $("#incList").innerHTML = k.incidents.map((i, n) => `<div class="item" data-n="${n}"><div class="grow">
       <div style="font-weight:600">${esc(i.meta.cause || i.file)}</div>
-      <div class="chips" style="margin-top:4px"><span class="chip">${esc(String(i.meta.date || "").slice(0, 10))}</span>${i.meta.symptom ? `<span class="chip accent">${esc(SYM[i.meta.symptom] || i.meta.symptom)}</span>` : ""}${(i.meta.components || []).map(x => `<span class="chip">${esc(x)}</span>`).join("")}</div></div></div>`).join("")
+      <div class="chips" style="margin-top:4px"><span class="chip">${esc(String(i.meta.date || "").slice(0, 10))}</span>${(i.meta.components || []).map(x => `<span class="chip">${esc(x)}</span>`).join("")}</div></div></div>`).join("")
     || '<div class="empty">아직 없습니다.</div>';
   $$("#incList .item").forEach(el => el.onclick = () => editInc(k.incidents[+el.dataset.n], el));
   $("#incForm").hidden = true;
@@ -775,7 +587,7 @@ $("#newInc").onclick = () => editInc(null);
 async function saveInc() {
   try {
     await api(kpath() + "/incidents", { file: S.inc, text: $("#incText").value });
-    toast("저장했습니다"); S.k = await api(kpath()); renderIncidents(); previewPlan();
+    toast("저장했습니다"); S.k = await api(kpath()); renderIncidents();
   } catch (e) { toast(e.message, 4000); }
 }
 $("#saveInc").onclick = saveInc;
@@ -785,7 +597,7 @@ $("#delInc").onclick = async () => {
   catch (e) { toast(e.message, 4000); }
 };
 
-showTab(store.get("tab") || "ask");
+showTab(store.get("tab") || "knowledge");
 loadClusters();
 </script>
 </body>

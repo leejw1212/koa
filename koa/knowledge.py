@@ -1,16 +1,33 @@
 #!/usr/bin/env python3
-"""KOA 클러스터 지식 — 읽기·검사·조사 계획. 설계: docs/koa-analysis-inputs.md
+"""KOA 클러스터 지식 — 읽기 · 꺼내기 · 더하기 · 제안.
 
-  python3 koa/knowledge.py list                               # 지식이 있는 클러스터
-  python3 koa/knowledge.py init <클러스터> [--example]        # local/knowledge/<클러스터>/ 만들기 (탐색한 큐·캐시·ingress 를 미리 채움)
-  python3 koa/knowledge.py check <클러스터>                   # flows.yaml 의 빈 곳·틀린 곳
-  python3 koa/knowledge.py plan <클러스터> "rmq 소비가 안 돼"   # 질문 → 조사 계획 (yaml)
-  python3 koa/knowledge.py merge <클러스터> cand.json [--pick 1,3] [--apply]
-                                                            # koa/flowmap.py 후보를 기존 지식에 더한다 (기본: 미리 보기)
+분석은 사용자가 말한 구성요소·흐름에 해당하는 지식만 쓴다. 분석하다 알게 된 것은 사용자가 OK 하면 더하고,
+도구(flowmap)가 찾은 것은 '제안'으로 남겨 두었다가 사용자가 고른 것만 더한다.
+
+  python3 koa/knowledge.py list                                   # 지식이 있는 클러스터
+  python3 koa/knowledge.py init <클러스터>                         # local/knowledge/<클러스터>/ 만들기
+  python3 koa/knowledge.py check <클러스터>                        # 빈 곳·틀린 곳
+  python3 koa/knowledge.py context <클러스터> "rmq 소비가 안 돼" [--with a,b]
+                                                                # 질문(또는 지정한 이름)에 해당하는 지식만 꺼낸다
+  python3 koa/knowledge.py add <클러스터> '<json>' [--dry-run]     # 지식에 더한다 (지우거나 덮지 않음)
+  python3 koa/knowledge.py incident <클러스터> '<json>'            # 과거 이슈 1건 기록
+  python3 koa/knowledge.py suggest <클러스터> '<json>' --title "…" [--source 분석]   # 제안으로만 남긴다
+  python3 koa/knowledge.py suggestions <클러스터>                  # 남아 있는 제안
+  python3 koa/knowledge.py accept|dismiss <클러스터> <id>          # 제안을 지식에 더하기 / 버리기
+
+<json> 모양 (전부 선택):
+  {"components": {"order-api": {"workload": "shop/Deployment/order-api", "kind": "app",
+                                "aliases": ["주문 API"], "log_signatures": ["Too many connections"]}},
+   "flows": [{"name": "주문", "nodes": ["ingress-nginx", "order-api", "orders-db"]}],
+   "normal": [{"component": "order-worker", "note": "매일 02:00 배치 때 큐가 쌓였다 빠진다"}]}
+incident: {"date": "2026-10-11", "components": ["rabbitmq"], "logs": ["disk resource limit alarm set"],
+           "cause": "PVC 90% → 디스크 알람", "body": "자유 서술"}
 
 웹 화면(koa/web.py)도 이 모듈을 그대로 쓴다. 클러스터는 건드리지 않는다 (파일만 읽고 쓴다).
 """
 import datetime as dt
+import hashlib
+import json
 import re
 import shutil
 import sys
@@ -23,18 +40,11 @@ from paths import CLUSTERS, KNOWLEDGE, KNOWLEDGE_TEMPLATE  # noqa: E402
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 ROLES = ("produce", "consume", "call")
-
-# 증상 유형 → 질문에 나오면 그 유형으로 보는 말 (앞에 있을수록 먼저)
-SYMPTOMS = [
-    ("queue-backlog", ["소비", "컨슘", "consum", "쌓", "적체", "backlog", "lag", "밀려", "안 빠", "안빠", "unacked"]),
-    ("log-pipeline", ["로그가 안", "로그 안", "로그가 없", "로그 수집", "fluent", "opensearch", "kibana", "로그 누락"]),
-    ("pending", ["pending", "펜딩", "스케줄", "schedul", "안 떠", "안떠", "생성이 안"]),
-    ("crash", ["crash", "크래시", "재시작", "restart", "죽", "oom", "꺼져", "내려"]),
-    ("errors", ["5xx", "500", "502", "503", "504", "에러", "오류", "error", "실패", "fail", "exception"]),
-    ("latency", ["느려", "느림", "지연", "타임아웃", "timeout", "latency", "slow", "응답이 늦", "오래 걸"]),
-    ("external-dependency", ["외부", "db 연결", "디비", "연결이 안", "connection refused", "connect"]),
-]
-SYMPTOM_NAMES = [s for s, _ in SYMPTOMS]
+QUEUE_WORDS = re.compile(r"rabbit|rmq|kafka|sqs|nats|pulsar|queue|큐|^mq$|-mq$|activemq|redis-stream", re.I)
+QUOTED = re.compile(r"[\"“”'‘’`]([^\"“”'‘’`]{4,120})[\"“”'‘’`]")
+LIST_FIELDS = ("aliases", "flow_nodes", "log_signatures")
+SCALAR_FIELDS = ("workload", "kind", "tier", "external")
+HEADER = "# KOA 클러스터 지식 — 구성요소 · 흐름 · 정상 패턴. 웹 화면이나 knowledge.py add 로 고친다.\n"
 
 
 # ---------- 읽기 ----------
@@ -51,7 +61,7 @@ def clusters():
     return sorted(p.name for p in KNOWLEDGE.iterdir() if p.is_dir() and NAME_RE.match(p.name))
 
 
-# 탐색(discover.py)에서 찾은 구성요소 중 앱 흐름에 들어가는 종류 → 지식 구성요소로 미리 채운다
+# 탐색(discover.py)에서 찾은 구성요소 중 앱 흐름에 들어가는 종류 → 웹에서 고를 후보
 APP_KINDS = ("message-queue", "cache", "ingress", "gateway", "database", "app")
 
 
@@ -77,383 +87,75 @@ def profile(cluster):
     return None
 
 
-def seed_components(prof):
-    """클러스터 프로필의 메시지 큐·캐시·ingress 를 구성요소로."""
-    comps = (prof or {}).get("components") or {}
-    # 관측·GitOps 도구가 사는 네임스페이스의 것(예: argocd-redis)은 앱 흐름이 아니다
-    infra_ns = {i.get("namespace") for c in comps.values() if (c or {}).get("kind") not in APP_KINDS
-                for i in ((c or {}).get("instances") or [])}
-    out = {}
-    for name, c in comps.items():
-        c = c or {}
-        if c.get("kind") not in APP_KINDS:
-            continue
-        insts = [i for i in (c.get("instances") or [])
-                 if i.get("namespace") and "/" in (i.get("workload") or "") and i["namespace"] not in infra_ns]
-        for n, inst in enumerate(insts):
-            key = name if n == 0 else "%s-%d" % (name, n + 1)
-            out[key] = {"workload": "%s/%s" % (inst["namespace"], inst["workload"]), "kind": c["kind"]}
-    return out
-
-
 def discover_candidates(cluster):
-    """discover 프로필에서 구성요소로 추가할 수 있는 후보 (메시지 큐·캐시·ingress·db 인스턴스를 모두).
-    이미 flows.yaml 구성요소에 들어간 워크로드는 제외. 사용자가 체크로 직접 고르는 용도."""
+    """discover 프로필에서 구성요소로 추가할 수 있는 후보. 이미 구성요소에 있는 워크로드는 뺀다."""
     prof = profile(cluster)
     if not prof:
         return []
-    comps = (prof or {}).get("components") or {}
-    have_wl = set()
-    for c in (load_flows(cluster).get("components") or {}).values():
-        w = (c or {}).get("workload")
-        if w:
-            have_wl.add(str(w))
-    out, seen = [], set()
-    for cname, c in comps.items():
+    have_wl = {str(c.get("workload")) for c in (load_flows(cluster).get("components") or {}).values()
+               if (c or {}).get("workload")}
+    out, seen, names = [], set(), {}
+    for cname, c in ((prof or {}).get("components") or {}).items():
         c = c or {}
         if c.get("kind") not in APP_KINDS:
             continue
         for inst in (c.get("instances") or []):
-            ns = inst.get("namespace")
-            w = inst.get("workload") or ""
-            if not ns or "/" not in w or w.count("/") != 1:
+            ns, w = inst.get("namespace"), inst.get("workload") or ""
+            if not ns or w.count("/") != 1:
                 continue
-            wl_full = "%s/%s" % (ns, w)
-            if wl_full in have_wl or wl_full in seen:
+            full = "%s/%s" % (ns, w)
+            if full in have_wl or full in seen:
                 continue
-            seen.add(wl_full)
-            base = w.rsplit("/", 1)[-1]
-            # 구성요소 이름: 워크로드 마지막 이름에서 유형 접두 제거한 간결한 이름, 중복 시 번호
-            n = base
-            if not n or n.lower() in {"deployment", "statefulset", "daemonset"}:
-                n = cname
-            out.append({"name": n, "workload": wl_full, "kind": c["kind"], "namespace": ns,
-                        "cname": cname, "count": len((c.get("instances") or []))})
-    # 이름 중복이면 번호를 붙여 유일하게
-    seen_names = {}
-    for o in out:
-        nm = o["name"]
-        seen_names[nm] = seen_names.get(nm, 0) + 1
-    cr = {}
-    for o in out:
-        nm = o["name"]
-        if seen_names[nm] > 1:
-            k = seen_names[nm]
-            unique = "%s-%d" % (nm, k)
-            while unique in seen_names:
-                k += 1
-                unique = "%s-%d" % (nm, k)
-            seen_names[nm] += 1
-            o["name"] = unique
-        c = o["cname"]
-        cr["%s|%s" % (c, o["workload"])] = o
-    return sorted(cr.values(), key=lambda x: (x["kind"], x["namespace"], x["name"]))
+            seen.add(full)
+            n = w.rsplit("/", 1)[-1] or cname
+            names[n] = names.get(n, 0) + 1
+            out.append({"name": n if names[n] == 1 else "%s-%d" % (n, names[n]), "workload": full,
+                        "kind": c["kind"], "namespace": ns})
+    return sorted(out, key=lambda x: (x["kind"], x["namespace"], x["name"]))
 
 
 def add_discovered_components(cluster, workloads):
-    """선택한 클러스터 워크로드(성분)를 flows.yaml components 에 추가.
-    workloads: ('namespace/Kind/name' 문자열 목록). 이미 있으면 그대로 둔다.
-    반환: (추가한 이름 목록, 흐름 check 결과)."""
-    d = cluster_dir(cluster)
-    f = d / "flows.yaml"
-    data = load_flows(cluster)
-    comps = data.setdefault("components", {})
-    have_wl = {str(c.get("workload")) for c in comps.values() if c.get("workload")}
+    """웹 '클러스터에서 고르기': 고른 워크로드('ns/Kind/name')를 구성요소로 더한다. 반환: (더한 이름, check)."""
     kind_of = {}
-    prof = profile(cluster) or {}
-    for cname, c in (prof.get("components") or {}).items():
+    for cname, c in ((profile(cluster) or {}).get("components") or {}).items():
         for inst in (c or {}).get("instances") or []:
-            ns = inst.get("namespace")
-            w = inst.get("workload") or ""
-            if ns and w and w.count("/") == 1:
+            ns, w = inst.get("namespace"), inst.get("workload") or ""
+            if ns and w.count("/") == 1:
                 kind_of["%s/%s" % (ns, w)] = (c or {}).get("kind") or cname
-    added = []
+    comps = {}
     for wl in workloads:
         wl = str(wl).strip()
-        if not wl or wl in have_wl:
-            continue
-        # 구성요소 이름: 워크로드 마지막 이름에서 유형 접두 제거, 중복 시 번호
-        base = wl.rsplit("/", 1)[-1]
-        name = base
-        exists = set(comps)
-        if name in exists:
-            i = 2
-            while "%s-%d" % (name, i) in exists:
-                i += 1
-            name = "%s-%d" % (name, i)
-        comps[name] = {"workload": wl, "kind": kind_of.get(wl) or "cache"}
-        have_wl.add(wl)
-        added.append(name)
-    if added:
-        with open(f, "w") as fh:
-            fh.write("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
-                     + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
-    return added, check(cluster, data)
-
-
-def delete_discovered_components(cluster, names):
-    """등록된 구성요소(들)를 flows.yaml 에서 제거한다. 제거하면 discover 후보로 되돌아간다.
-    names: 구성요소 이름 목록. 없거나 이미 없으면 그대로.
-    반환: (제거한 이름 목록, 남은 구성요소 dict)."""
-    d = cluster_dir(cluster)
-    f = d / "flows.yaml"
-    if not f.is_file():
-        return [], {}
-    data = load_flows(cluster)
-    comps = data.get("components") or {}
-    removed = [n for n in names if n in comps]
-    for n in removed:
-        del comps[n]
-    if removed:
-        with open(f, "w") as fh:
-            fh.write("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
-                     + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
-    return removed, comps
-
-
-def save_shards(cluster, sdata):
-    """구조화 지식(파편)을 flows.yaml 에 직접 쓴다. 자유글 파서 없이 개별 편집 UI 용도.
-    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[시작..끝]}, ...], "normal": [...]}
-    flows 의 nodes 는 노드 체인(문자열 목록)으로 받아 hops 로 변환해 저장한다.
-    반환: {"components":.., "flows":.., "normal":.., "check":[(level,msg),...]} (저장된 flows.yaml dict)."""
-    d = cluster_dir(cluster)
-    d.mkdir(parents=True, exist_ok=True)  # 지식 폴더가 아직 없는 클러스터 (flowmap 후보를 처음 더할 때)
-    f = d / "flows.yaml"
-    comps = {}
-    for n, c in (sdata.get("components") or {}).items():
-        c = c or {}
-        if not n:
-            continue
-        comp = {}
-        for k in ("workload", "kind", "tier", "aliases", "flow_nodes", "external", "log_signatures"):
-            if c.get(k) is not None and c.get(k) != "" and c.get(k) != []:
-                if k in ("aliases", "flow_nodes", "log_signatures") and not isinstance(c.get(k), list):
-                    continue
-                comp[k] = c[k]
-        if comp:
-            comps[n] = comp
-    flows = {}
-    from freeform import QUEUE_WORDS  # noqa: E402 — 흐름의 생산/소비 판별
-    for fl in (sdata.get("flows") or []):
-        name = (fl.get("name") or "").strip()
-        nodes = [x.strip() for x in (fl.get("nodes") or []) if x and x.strip()]
-        if not name or len(nodes) < 2:
-            continue
-        queue = [n for n in nodes if QUEUE_WORDS.search(n) or comps.get(n, {}).get("kind") == "message-queue"]
-        if queue:
-            hops = []
-            for a, b in zip(nodes, nodes[1:]):
-                role = "produce" if b in queue else "consume" if a in queue else "call"
-                hops.append({"from": a, "to": b, "role": role})
-            kind = fl.get("kind") or ("queue" if queue else "http")
-        else:
-            hops, kind = nodes, "http"
-        flows[name] = {"kind": kind, "hops": hops}
-    normal = []
-    for x in (sdata.get("normal") or []):
-        c = (x.get("component") or "").strip()
-        note = (x.get("note") or "").strip()
-        if c and note:
-            normal.append({"component": c, "note": note})
-    data = {"schema": "koa.knowledge/v1", "cluster": cluster,
-            "components": comps, "flows": flows, "normal": normal}
-    if f.is_file():
-        (d / "flows.yaml.bak").write_text(f.read_text())
-    with open(f, "w") as fh:
-        fh.write("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
-                 + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
-    # architecture.md(자유글 원본)는 파편 편집이 원본이 되므로 갱신 — 편집 요약으로 덮는다
-    a = d / "architecture.md"
-    comp_lines = "".join("# %s\n%s\n" % (n, _comp_prose(c, n)) for n, c in comps.items())
-    flow_lines = "".join("%s\n" % (" → ".join(_flow_nodes(fl)) + ("  # %s" % fl["kind"] if fl.get("kind") else "")) for fl in flows.values())
-    norm_lines = "".join("%s: %s\n" % (x["component"], x["note"]) for x in normal)
-    a.write_text("# 클러스터 지식 (파편 편집)\n\n%s%s%s" % (comp_lines, flow_lines, norm_lines))
-    return {"components": comps, "flows": flows, "normal": normal,
-            "check": [(lv, m) for lv, m in check(cluster, data)]}
-
-
-def merge_candidates(cluster, cand, pick=None, apply=False):
-    """koa/flowmap.py 후보(파편 형식)를 기존 지식에 더한다. 기존 구성요소·흐름·정상 패턴은 지우거나 고치지 않는다.
-    같은 workload 의 구성요소는 기존 이름으로 바꿔 쓰고, 기존 흐름과 같거나 그 일부인 흐름은 건너뛴다.
-    pick: 더할 후보 흐름 번호(1부터) 목록. apply=False 면 미리 보기만.
-    반환: {"components": [더한 이름], "flows": [(이름, 노드)], "skipped": [(이름, 이유)], "check": [...], "saved": bool}"""
-    data = load_flows(cluster)
-    comps = {n: dict(c or {}) for n, c in (data.get("components") or {}).items()}
-    by_wl = {c.get("workload"): n for n, c in comps.items() if c.get("workload")}
-    rename, added_c = {}, []
-    cand_flows = list(cand.get("flows") or [])
-    wanted = set(pick) if pick else set(range(1, len(cand_flows) + 1))
-    used = {x for i, f in enumerate(cand_flows, 1) if i in wanted for x in f.get("nodes") or []}
-    for n, c in (cand.get("components") or {}).items():
-        c = dict(c or {})
-        if n not in used:
-            continue
-        w = c.get("workload")
-        if w and w in by_wl:
-            rename[n] = by_wl[w]
-            continue
-        if not w:
-            hit = node_to_comps(n, comps)
-            if hit:
-                rename[n] = hit[0]
-                continue
-        name, i = n, 2
-        while name in comps:
-            name, i = "%s-%d" % (n, i), i + 1
-        comps[name] = c
-        rename[n] = name
-        added_c.append(name)
-
-    def canon(chain):
-        return tuple((node_to_comps(x, comps) or [x])[0] for x in chain)
-
-    def inside(short, long_):
-        return any(long_[i:i + len(short)] == short for i in range(len(long_) - len(short) + 1))
-
-    old = [canon(_flow_nodes(f)) for f in (data.get("flows") or {}).values()]
-    flows = [{"name": n, "kind": f.get("kind"), "nodes": _flow_nodes(f)} for n, f in (data.get("flows") or {}).items()]
-    names = {f["name"] for f in flows}
-    added_f, skipped = [], []
-    for i, f in enumerate(cand_flows, 1):
-        if i not in wanted:
-            continue
-        nodes = [rename.get(x, x) for x in f.get("nodes") or []]
-        c = canon(nodes)
-        if any(inside(c, o) for o in old):
-            skipped.append((f.get("name"), "기존 흐름에 이미 있다"))
-            continue
-        name, j = f.get("name") or " → ".join(nodes), 2
-        while name in names:
-            name, j = "%s (%d)" % (f.get("name"), j), j + 1
-        names.add(name)
-        old.append(c)
-        flows.append({"name": name, "kind": f.get("kind"), "nodes": nodes})
-        added_f.append((name, nodes))
-    sdata = {"components": comps, "flows": flows, "normal": data.get("normal") or []}
-    out = {"components": added_c, "flows": added_f, "skipped": skipped, "saved": False}
-    if apply and (added_c or added_f):
-        saved = save_shards(cluster, sdata)
-        out.update(check=saved["check"], saved=True)
-    else:
-        tmp = {"schema": "koa.knowledge/v1", "cluster": cluster, "components": comps, "normal": sdata["normal"],
-               "flows": {f["name"]: {"kind": f.get("kind") or "http", "hops": f["nodes"]} for f in flows}}
-        out["check"] = check(cluster, tmp)
-    return out
-
-
-def _comp_prose(c, name):
-    parts = []
-    if c.get("workload") and c.get("workload").count("/") == 2:
-        ns, _, wl = c.get("workload").split("/", 2)
-        parts.append("%s 는 %s/%s 이고" % (name, ns, wl))
-    elif c.get("external"):
-        parts.append("%s 는 클러스터 밖이고" % name)
-    al = list(c.get("aliases") or [])
-    if al:
-        parts.append("(%s) 라고도 불러" % ", ".join(al))
-    sg = list(c.get("log_signatures") or [])
-    if sg:
-        parts.append('죽으면 "%s" 이 찍혀' % sg[0])
-    if not parts:
-        parts.append("%s 는 구성요소" % name)
-    return " ".join(parts) + "\n"
-
-
-def _flow_nodes(fl):
-    hops = (fl or {}).get("hops") or []
-    if hops and all(isinstance(h, str) for h in hops):
-        return hops
-    nodes, prev = [], None
-    for h in hops:
-        f = (h or {}).get("from")
-        if f != prev:
-            nodes.append(f)
-        nodes.append((h or {}).get("to"))
-        prev = (h or {}).get("to") or f
-    return [n for n in nodes if n]
-
-
-def init(cluster, example=False):
-    """지식 폴더를 만든다. 기본은 빈 구조 + 클러스터 프로필에서 찾은 큐·캐시·ingress.
-    example=True 면 템플릿 예시(order-api 등)를 그대로 — 연습용. 실제 클러스터에 쓰면 예시가 분석 경로에 섞인다."""
-    d = cluster_dir(cluster)
-    if d.exists():
-        raise ValueError("이미 있다: %s" % d)
-    shutil.copytree(str(KNOWLEDGE_TEMPLATE), str(d), ignore=shutil.ignore_patterns("README.md"))
-    f = d / "flows.yaml"
-    if example:
-        f.write_text(f.read_text().replace("cluster: <클러스터>", "cluster: %s" % cluster))
-    else:
-        for x in (d / "incidents").glob("*.md"):
-            x.unlink()
-        data = {"schema": "koa.knowledge/v1", "cluster": cluster,
-                "components": seed_components(profile(cluster)), "flows": {}, "normal": []}
-        f.write_text("# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md\n"
-                     "# 예시: koa/templates/knowledge/flows.yaml\n"
-                     + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
-    a = d / "architecture.md"
-    if example:
-        a.write_text(a.read_text().replace("<클러스터>", cluster, 1))
-    else:
-        a.write_text(STARTER % (cluster, ", ".join(data["components"]) or "(없음)"))
-    return d
-
-
-STARTER = """# %s
-
-<!--
-자유롭게 쓰세요. KOA 는 아래 같은 줄을 알아듣고 분석 경로로 씁니다. (이 안내는 읽지 않습니다)
-  사용자 → ingress-nginx → gateway → order-api → orders-db      화살표 줄 = 요청이 지나는 길
-  order-api → rabbitmq(rmq, 래빗) → order-worker               큐를 지나면 넣기/꺼내기로 이해, 괄호 안은 별명
-  orders-db 는 클러스터 밖 RDS. 문제가 나면 "Too many connections" 가 찍힌다   따옴표 = 먼저 찾을 로그 문구
-  매일 02:00 배치 때 order-worker 큐가 쌓였다 빠진다             정상 패턴 (오탐 줄이기)
--->
-
-탐색에서 찾은 것: %s
-
-## 서비스 구조
-
-
-## 요청 흐름
-
-
-## 운영하면서 알게 된 것
-
-"""
+        if wl:
+            comps[wl.rsplit("/", 1)[-1]] = {"workload": wl, "kind": kind_of.get(wl) or "app"}
+    r = apply_additions(cluster, {"components": comps})
+    return r["components"], r["check"]
 
 
 def load_flows(cluster):
     f = cluster_dir(cluster) / "flows.yaml"
-    if not f.is_file():
-        return {"schema": "koa.knowledge/v1", "cluster": cluster, "components": {}, "flows": {}, "normal": []}
-    data = yaml.safe_load(f.read_text()) or {}
-    data.setdefault("components", {})
-    data.setdefault("flows", {})
-    data.setdefault("normal", [])
+    data = (yaml.safe_load(f.read_text()) or {}) if f.is_file() else {}
+    data.setdefault("schema", "koa.knowledge/v1")
+    data.setdefault("cluster", cluster)
     for k in ("components", "flows"):
-        if data[k] is None:
+        if not isinstance(data.get(k), dict):
             data[k] = {}
-    if data["normal"] is None:
+    if not isinstance(data.get("normal"), list):
         data["normal"] = []
     return data
 
 
 def edges(flow):
-    """flow 의 hops 를 {from, to, role, via} 목록으로. 문자열 목록은 동기 호출 체인(call)."""
+    """flow 의 hops 를 {from, to, role} 목록으로. 문자열 목록은 동기 호출 체인(call)."""
     hops = (flow or {}).get("hops") or []
     out = []
     if hops and all(isinstance(h, str) for h in hops):
         for a, b in zip(hops, hops[1:]):
-            out.append({"from": a, "to": b, "role": "call", "via": ""})
-        if len(hops) == 1:
-            out.append({"from": hops[0], "to": "", "role": "call", "via": ""})
+            out.append({"from": a, "to": b, "role": "call"})
         return out
     for h in hops:
         if isinstance(h, dict):
             out.append({"from": str(h.get("from") or ""), "to": str(h.get("to") or ""),
-                        "role": str(h.get("role") or "call"), "via": str(h.get("via") or "")})
-        elif isinstance(h, str):
-            out.append({"from": h, "to": "", "role": "call", "via": ""})
+                        "role": str(h.get("role") or "call")})
     return out
 
 
@@ -463,40 +165,27 @@ def flow_nodes(flow):
         for n in (e["from"], e["to"]):
             if n and n not in seen:
                 seen.append(n)
+    if not seen:
+        seen = [h for h in ((flow or {}).get("hops") or []) if isinstance(h, str)]
     return seen
 
 
 def node_to_comps(node, comps):
-    """흐름 노드가 가리키는 구성요소 이름 목록.
-
-    매칭은 구성요소 이름 + aliases + flow_nodes(흐름 매칭 전용) 를 상대로 한다.
-    규칙: 흐름 노드가 그 이름과 같거나, 한쪽이 다른 쪽을 부분 문자열로 포함하면 매칭.
-    예: 노드 'OpenAPI G/W or Console Wrapper' 는 flow_nodes 에 'Console Wrapper' 를
-    둔 admin/manager/user-console-wrapper 를 모두 가리킨다.
-    """
+    """흐름 노드가 가리키는 구성요소 이름 목록 (이름·aliases·flow_nodes 와 같거나 부분 문자열).
+    노드가 구성요소 이름 그대로면 그 하나만 ('shop-worker' 가 alias 'shop' 의 shop-api 로 새지 않게)."""
     if not node:
         return []
-    # 노드가 구성요소 이름 그대로면 그 하나만: 'shop-worker' 가 alias 'shop' 의 shop-api 로
-    # 부분 문자열 매칭되어 새지 않게
     if node in (comps or {}):
         return [node]
     nl = str(node).lower()
     hits = []
     for name, c in (comps or {}).items():
-        names = [name] + list((c or {}).get("aliases") or []) + list((c or {}).get("flow_nodes") or [])
-        for a in names:
+        for a in [name] + list((c or {}).get("aliases") or []) + list((c or {}).get("flow_nodes") or []):
             al = str(a).lower().strip()
-            if not al:
-                continue
-            if nl == al or (len(al) >= 3 and (al in nl or nl in al)):
+            if al and (nl == al or (len(al) >= 3 and (al in nl or nl in al))):
                 hits.append(name)
                 break
     return hits
-
-
-def flow_has_target(flow, target, comps):
-    """구성요소 target 이 흐름의 어떤 노드를 대표하는가 (노드 → 구성요소 매칭)."""
-    return any(target in node_to_comps(n, comps) for n in flow_nodes(flow))
 
 
 def parse_front(text):
@@ -522,9 +211,159 @@ def load_incidents(cluster):
     return out
 
 
-def incident_text(meta, body):
-    head = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False, default_flow_style=None).strip()
-    return "---\n%s\n---\n%s\n" % (head, (body or "").strip())
+def incident_logs(meta):
+    sig = meta.get("signature")
+    return list((sig or {}).get("logs") or []) if isinstance(sig, dict) else []
+
+
+# ---------- 쓰기 ----------
+
+def _write_flows(cluster, data):
+    d = cluster_dir(cluster)
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "flows.yaml"
+    if f.is_file():
+        (d / "flows.yaml.bak").write_text(f.read_text())
+    f.write_text(HEADER + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120))
+
+
+def _hops(nodes, comps, kind=None):
+    queue = [n for n in nodes if QUEUE_WORDS.search(n) or (comps.get(n) or {}).get("kind") == "message-queue"]
+    if not queue:
+        return list(nodes), kind or "http"
+    return ([{"from": a, "to": b, "role": "produce" if b in queue else "consume" if a in queue else "call"}
+             for a, b in zip(nodes, nodes[1:])], kind or "queue")
+
+
+def save_shards(cluster, sdata):
+    """웹 편집 화면의 전체 상태를 flows.yaml 로 쓴다 (덮어쓰기).
+    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[…]}], "normal": [{component, note}]}"""
+    comps = {}
+    for n, c in (sdata.get("components") or {}).items():
+        c = c or {}
+        comp = {}
+        for k in SCALAR_FIELDS + LIST_FIELDS:
+            v = c.get(k)
+            if v in (None, "", []) or (k in LIST_FIELDS and not isinstance(v, list)):
+                continue
+            comp[k] = v
+        if n:
+            comps[n] = comp
+    flows = {}
+    for fl in (sdata.get("flows") or []):
+        name = (fl.get("name") or "").strip()
+        nodes = [x.strip() for x in (fl.get("nodes") or []) if x and x.strip()]
+        if name and len(nodes) >= 2:
+            hops, kind = _hops(nodes, comps, fl.get("kind"))
+            flows[name] = {"kind": kind, "hops": hops}
+    normal = []
+    for x in (sdata.get("normal") or []):
+        c, note = (x.get("component") or "").strip(), (x.get("note") or "").strip()
+        if c and note and {"component": c, "note": note} not in normal:
+            normal.append({"component": c, "note": note})
+    data = {"schema": "koa.knowledge/v1", "cluster": cluster, "components": comps, "flows": flows, "normal": normal}
+    _write_flows(cluster, data)
+    return {"components": comps, "flows": flows, "normal": normal, "check": check(cluster, data)}
+
+
+def apply_additions(cluster, add, apply=True):
+    """지식에 더한다. 기존 것은 지우거나 덮지 않는다:
+    - 같은 이름 또는 같은 workload 의 구성요소 → 목록 칸(aliases·log_signatures·flow_nodes)은 합치고, 빈 칸만 채운다
+    - 기존 흐름과 같거나 그 일부인 흐름 → 건너뛴다
+    반환: {"components": [새 이름], "updated": {이름: [칸]}, "flows": [(이름, 노드)], "normal": [...],
+          "skipped": [(이름, 이유)], "check": [...], "saved": bool, "changed": bool}"""
+    data = load_flows(cluster)
+    comps = {n: dict(c or {}) for n, c in data["components"].items()}
+    by_wl = {c.get("workload"): n for n, c in comps.items() if c.get("workload")}
+    rename, added_c, updated = {}, [], {}
+    for n, c in ((add or {}).get("components") or {}).items():
+        c = {k: v for k, v in dict(c or {}).items() if k in SCALAR_FIELDS + LIST_FIELDS and v not in (None, "", [])}
+        tgt = n if n in comps else by_wl.get(c.get("workload"))
+        if not tgt and not c.get("workload"):
+            hit = node_to_comps(n, comps)
+            tgt = hit[0] if len(hit) == 1 else None
+        if not tgt:
+            comps[n] = c
+            added_c.append(n)
+            rename[n] = n
+            if c.get("workload"):
+                by_wl[c["workload"]] = n
+            continue
+        rename[n] = tgt
+        cur, ch = comps[tgt], []
+        for k in LIST_FIELDS:
+            new = [x for x in (c.get(k) or []) if x not in (cur.get(k) or []) and x != tgt]
+            if new:
+                cur[k] = list(cur.get(k) or []) + new
+                ch.append(k)
+        for k in SCALAR_FIELDS:
+            if c.get(k) not in (None, "") and cur.get(k) in (None, ""):
+                cur[k] = c[k]
+                ch.append(k)
+        if ch:
+            updated[tgt] = sorted(set(updated.get(tgt, []) + ch))
+
+    def canon(chain):
+        return tuple((node_to_comps(x, comps) or [x])[0] for x in chain)
+
+    def inside(short, long_):
+        return any(long_[i:i + len(short)] == short for i in range(len(long_) - len(short) + 1))
+
+    flows = [{"name": n, "kind": f.get("kind"), "nodes": flow_nodes(f)} for n, f in data["flows"].items()]
+    old = [canon(f["nodes"]) for f in flows]
+    names = {f["name"] for f in flows}
+    added_f, skipped = [], []
+    for f in ((add or {}).get("flows") or []):
+        nodes = [rename.get(x, x) for x in (f.get("nodes") or []) if x]
+        base = f.get("name") or " → ".join(nodes)
+        if len(nodes) < 2:
+            skipped.append((base, "노드가 2개 미만"))
+            continue
+        c = canon(nodes)
+        if any(inside(c, o) for o in old):
+            skipped.append((base, "기존 흐름에 이미 있다"))
+            continue
+        name, j = base, 2
+        while name in names:
+            name, j = "%s (%d)" % (base, j), j + 1
+        names.add(name)
+        old.append(c)
+        flows.append({"name": name, "kind": f.get("kind"), "nodes": nodes})
+        added_f.append((name, nodes))
+    normal = list(data["normal"])
+    added_n = []
+    for x in ((add or {}).get("normal") or []):
+        item = {"component": rename.get(x.get("component"), x.get("component")), "note": (x.get("note") or "").strip()}
+        if item["component"] and item["note"] and item not in normal:
+            normal.append(item)
+            added_n.append(item)
+    changed = bool(added_c or updated or added_f or added_n)
+    sdata = {"components": comps, "flows": flows, "normal": normal}
+    out = {"components": added_c, "updated": updated, "flows": added_f, "normal": added_n, "skipped": skipped,
+           "saved": False, "changed": changed}
+    if apply and changed:
+        out["check"] = save_shards(cluster, sdata)["check"]
+        out["saved"] = True
+    else:
+        tmp = {"components": comps, "normal": normal,
+               "flows": {f["name"]: {"kind": f.get("kind") or "http", "hops": f["nodes"]} for f in flows}}
+        out["check"] = check(cluster, tmp)
+    return out
+
+
+def additions_text(r):
+    L = []
+    for n in r["components"]:
+        L.append("+ 구성요소 %s" % n)
+    for n, ks in r["updated"].items():
+        L.append("~ 구성요소 %s (%s)" % (n, ", ".join(ks)))
+    for n, nodes in r["flows"]:
+        L.append("+ 흐름 %s: %s" % (n, " → ".join(nodes)))
+    for x in r["normal"]:
+        L.append("+ 정상 패턴 %s: %s" % (x["component"], x["note"]))
+    for n, why in r["skipped"]:
+        L.append("= %s: %s" % (n, why))
+    return "\n".join(L) or "(더할 것 없음 — 이미 있다)"
 
 
 def slug(text):
@@ -532,14 +371,170 @@ def slug(text):
     return s[:40] or "incident"
 
 
+def incident_text(meta, body):
+    head = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False, default_flow_style=None).strip()
+    return "---\n%s\n---\n%s\n" % (head, (body or "").strip())
+
+
+def _date(text):
+    m = re.search(r"(20\d\d)[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})", text)
+    if m:
+        try:
+            return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    return None
+
+
+def incident_meta(text, comps):
+    """이슈 자유 글 → 머리말 (date, components, signature.logs, cause). 웹 '과거 이슈' 탭."""
+    meta = {}
+    d = _date(text)
+    if d:
+        meta["date"] = d
+    low = text.lower()
+    found = [n for n, c in sorted((comps or {}).items(), key=lambda kv: -len(kv[0]))
+             if any(a and a.lower() in low for a in [n] + list((c or {}).get("aliases") or []))]
+    if found:
+        meta["components"] = found
+    quotes = []
+    for q in QUOTED.findall(text):
+        if q.strip() not in quotes:
+            quotes.append(q.strip())
+    if quotes:
+        meta["signature"] = {"logs": quotes}
+    first = next((l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")), "")
+    m = re.search(r"원인\s*[:：은는]?\s*(.+)", text)
+    meta["cause"] = re.split(r"(?<=[^0-9])\.\s|\n", (m.group(1) if m else first).strip())[0].strip()[:120]
+    return meta
+
+
+def write_incident(cluster, inc):
+    """과거 이슈 1건을 incidents/<날짜>-<slug>.md 로. inc: {date, components, logs, cause, body}."""
+    d = cluster_dir(cluster) / "incidents"
+    d.mkdir(parents=True, exist_ok=True)
+    date = inc.get("date") or dt.date.today().isoformat()
+    meta = {"date": date, "components": list(inc.get("components") or []),
+            "signature": {"logs": list(inc.get("logs") or [])}, "cause": inc.get("cause") or ""}
+    if inc.get("found_by"):
+        meta["found_by"] = inc["found_by"]
+    name = "%s-%s.md" % (date, slug(inc.get("cause") or ""))
+    f, i = d / name, 2
+    while f.exists():
+        f, i = d / ("%s-%s-%d.md" % (date, slug(inc.get("cause") or ""), i)), i + 1
+    f.write_text(incident_text(meta, inc.get("body") or ""))
+    return f
+
+
+# ---------- 제안 (flowmap 이나 분석이 찾은 것, 사용자가 고르면 더한다) ----------
+
+def _sfile(cluster):
+    return cluster_dir(cluster) / "suggestions.yaml"
+
+
+def _sload(cluster):
+    f = _sfile(cluster)
+    d = (yaml.safe_load(f.read_text()) or {}) if f.is_file() else {}
+    return {"pending": list(d.get("pending") or []), "dismissed": list(d.get("dismissed") or [])}
+
+
+def _ssave(cluster, s):
+    cluster_dir(cluster).mkdir(parents=True, exist_ok=True)
+    _sfile(cluster).write_text("# KOA 지식 제안 — 웹 '클러스터 지식' 화면이나 knowledge.py accept/dismiss 로 처리한다\n"
+                               + yaml.safe_dump(s, allow_unicode=True, sort_keys=False, width=120))
+
+
+def _skey(add):
+    """같은 제안을 알아보는 열쇠: 흐름은 노드(워크로드) 순서, 그 밖은 내용 전체."""
+    comps = (add or {}).get("components") or {}
+    wl = lambda n: (comps.get(n) or {}).get("workload") or n  # noqa: E731
+    parts = [" > ".join(wl(n) for n in f.get("nodes") or []) for f in (add or {}).get("flows") or []]
+    if not parts:
+        parts = [json.dumps(add, sort_keys=True, ensure_ascii=False, default=str)]
+    return hashlib.sha1("|".join(sorted(parts)).encode()).hexdigest()[:10]
+
+
+def add_suggestion(cluster, title, add, source, why=None):
+    """제안 하나를 남긴다. 이미 지식에 있거나, 같은 제안이 있거나, 전에 버린 것이면 남기지 않는다 (None)."""
+    s = _sload(cluster)
+    key = _skey(add)
+    if key in s["dismissed"] or any(p["id"] == key for p in s["pending"]):
+        return None
+    if not apply_additions(cluster, add, apply=False)["changed"]:
+        return None
+    s["pending"].append({"id": key, "title": title, "source": source, "why": why or "",
+                         "created": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "add": add})
+    _ssave(cluster, s)
+    return key
+
+
+def list_suggestions(cluster):
+    """남은 제안 + 지금 더하면 무엇이 바뀌는지. 그새 지식에 들어가 더할 것이 없어진 제안은 뺀다."""
+    out = []
+    for p in _sload(cluster)["pending"]:
+        r = apply_additions(cluster, p.get("add") or {}, apply=False)
+        if r["changed"]:
+            out.append(dict(p, preview=additions_text(r)))
+    return out
+
+
+def resolve_suggestion(cluster, sid, accept):
+    s = _sload(cluster)
+    hit = next((p for p in s["pending"] if p["id"] == sid), None)
+    if not hit:
+        raise LookupError("없는 제안: %s" % sid)
+    r = apply_additions(cluster, hit.get("add") or {}) if accept else None
+    s["pending"] = [p for p in s["pending"] if p["id"] != sid]
+    if not accept:
+        s["dismissed"].append(sid)
+    _ssave(cluster, s)
+    return r
+
+
+def suggest_from_flowmap(cluster, shards, source):
+    """flowmap 후보(파편 형식)를 흐름마다 제안 하나로. 같은 출처의 이전 flowmap 제안은 새 결과로 바꾼다.
+    반환: 새로 남긴 제안 id 목록."""
+    s = _sload(cluster)
+    s["pending"] = [p for p in s["pending"] if not str(p.get("source", "")).startswith("flowmap")]
+    _ssave(cluster, s)
+    comps = shards.get("components") or {}
+    ids = []
+    for f in shards.get("flows") or []:
+        add = {"components": {n: comps[n] for n in f.get("nodes") or [] if n in comps},
+               "flows": [{"name": f.get("name"), "kind": f.get("kind"), "nodes": f.get("nodes")}]}
+        sid = add_suggestion(cluster, "흐름 %s" % " → ".join(f.get("nodes") or []), add, source, f.get("why"))
+        if sid:
+            ids.append(sid)
+    return ids
+
+
+# ---------- 새 클러스터 ----------
+
+def init(cluster):
+    """빈 지식 폴더를 만든다. 구성요소는 웹 '클러스터에서 고르기'나 대화로 더한다."""
+    d = cluster_dir(cluster)
+    if d.exists():
+        raise ValueError("이미 있다: %s" % d)
+    (d / "incidents").mkdir(parents=True)
+    _write_flows(cluster, {"schema": "koa.knowledge/v1", "cluster": cluster, "components": {}, "flows": {}, "normal": []})
+    (d / "architecture.md").write_text(STARTER % cluster)
+    return d
+
+
+STARTER = """# %s
+
+<!-- 자유 메모. 구조로 못 적는 것(팀, 운영 관행, 주의할 점)을 적는다. KOA 는 분석 때 참고로 읽는다. -->
+"""
+
+
 # ---------- 검사 ----------
 
 def check(cluster, data=None):
-    """flows.yaml 의 문제 목록 [(level, 문구)]. level: error | warn."""
+    """지식의 문제 목록 [(level, 문구)]. level: error | warn."""
     data = data if data is not None else load_flows(cluster)
     comps = data.get("components") or {}
     out = []
-    alias_owner = {}
+    owner = {}
     for name, c in comps.items():
         c = c or {}
         if not c.get("external") and not c.get("workload"):
@@ -549,9 +544,9 @@ def check(cluster, data=None):
             out.append(("error", "%s: workload 는 <ns>/<Kind>/<이름> 형식이어야 한다 (지금 %r)" % (name, w)))
         for a in [name] + list(c.get("aliases") or []):
             k = str(a).lower()
-            if k in alias_owner and alias_owner[k] != name:
-                out.append(("warn", "'%s' 가 %s 와 %s 둘 다의 이름이다 (질문에서 대상을 못 가린다)" % (a, alias_owner[k], name)))
-            alias_owner[k] = name
+            if k in owner and owner[k] != name:
+                out.append(("warn", "'%s' 가 %s 와 %s 둘 다의 이름이다 (질문에서 못 가린다)" % (a, owner[k], name)))
+            owner[k] = name
     for fname, f in (data.get("flows") or {}).items():
         es = edges(f)
         if not es:
@@ -559,13 +554,12 @@ def check(cluster, data=None):
         for e in es:
             for n in (e["from"], e["to"]):
                 if n and not node_to_comps(n, comps):
-                    out.append(("warn", "흐름 %s: '%s' 가 구성요소에 없다 (경로에는 나오지만 워크로드를 모른다)" % (fname, n)))
+                    out.append(("warn", "흐름 %s: '%s' 가 구성요소에 없다 (워크로드를 모른다)" % (fname, n)))
             if e["role"] not in ROLES:
                 out.append(("error", "흐름 %s: role '%s' 는 produce | consume | call 중 하나" % (fname, e["role"])))
     for n in data.get("normal") or []:
         if isinstance(n, dict) and n.get("component") and n["component"] not in comps:
             out.append(("warn", "정상 패턴: '%s' 가 구성요소에 없다" % n["component"]))
-    # 중복 제거, 순서 유지
     seen, uniq = set(), []
     for x in out:
         if x not in seen:
@@ -574,200 +568,115 @@ def check(cluster, data=None):
     return uniq
 
 
-# ---------- 조사 계획 ----------
+# ---------- 꺼내기: 질문에 해당하는 지식만 ----------
 
-def find_targets(question, comps):
-    """질문에서 매칭된 구성요소 후보 목록. 최고 매칭 길이 기준으로 동점인 것들을 모두 반환.
-    이름 + aliases + flow_nodes 를 모두 상대로 하되, 여러 구성요소가 같은 흐름 이름
-    (예: Console Wrapper) 을 공유하면 모두 후보로 남겨 사용자가 직접 고르게 한다."""
-    q = question.lower()
-    best_len, by_len = 0, set()
-    for name, c in (comps or {}).items():
-        for a in [name] + list((c or {}).get("aliases") or []) + list((c or {}).get("flow_nodes") or []):
-            a = str(a).lower().strip()
-            if a and a in q:
-                L = len(a)
-                if L > best_len:
-                    best_len, by_len = L, {name}
-                elif L == best_len:
-                    by_len.add(name)
-                break  # 이 구성요소는 가장 긴 매칭 이름 하나로만 평가
-    return sorted(by_len)
-
-
-def find_target(question, comps):
-    """질문에서 유일하게 대상이 가려지면 그 이름, 애매하면(동점 후보 여럿) None."""
-    ts = find_targets(question, comps)
-    return ts[0] if len(ts) == 1 else None
-
-
-def find_symptom(question):
-    q = question.lower()
-    for name, words in SYMPTOMS:
-        if any(w in q for w in words):
-            return name
-    return None
+def mentions(text, comps, flows=None):
+    """질문에 나온 구성요소·흐름 (나온 순서). 긴 이름부터 맞추고 맞춘 자리는 지워서 'shop-worker' 가 'shop' 으로 또 잡히지 않게."""
+    low = (text or "").lower()
+    terms = []
+    for n, c in (comps or {}).items():
+        for a in [n] + list((c or {}).get("aliases") or []) + list((c or {}).get("flow_nodes") or []):
+            if str(a).strip():
+                terms.append((str(a).lower().strip(), "c", n))
+    for n in (flows or {}):
+        terms.append((str(n).lower(), "f", n))
+    terms.sort(key=lambda t: -len(t[0]))
+    found = []
+    for term, kind, name in terms:
+        i = low.find(term)
+        if i < 0:
+            continue
+        low = low[:i] + " " * len(term) + low[i + len(term):]
+        found.append((i, kind, name))
+    found.sort()
+    comps_hit, flows_hit = [], []
+    for _, kind, name in found:
+        lst = comps_hit if kind == "c" else flows_hit
+        if name not in lst:
+            lst.append(name)
+    return comps_hit, flows_hit
 
 
-def find_since(question):
-    m = re.search(r"(\d+)\s*(분|시간|일|m\b|min|h\b|d\b)", question.lower())
-    if not m:
-        return None
-    n, u = int(m.group(1)), m.group(2)
-    return "%d%s" % (n, {"분": "m", "min": "m", "m": "m", "시간": "h", "h": "h", "일": "d", "d": "d"}[u])
-
-
-def order_path(target, symptom, data):
-    """대상을 지나는 흐름에서 확인 순서대로 [(구성요소, 역할 설명)]."""
-    comps = data.get("components") or {}
-    flows = data.get("flows") or {}
-    hit = {n: f for n, f in flows.items() if flow_has_target(f, target, comps)}
-    path = []
-
-    def resolve(node):
-        """흐름 노드 → 구성요소 이름들 (못 찾으면 노드 이름 그대로)."""
-        if not node:
-            return []
-        return node_to_comps(node, comps) or [node]
-
-    def add(name, why):
-        # 흐름 노드 이름(예: '대상 사이트')은 그 노드를 대표하는 구성요소들로 바꿔 넣는다
-        for n in resolve(name):
-            if n and n not in [p[0] for p in path]:
-                path.append((n, why))
-
-    def target_nodes(f):
-        """흐름 f 에서 target 을 가리키는 노드 이름들."""
-        return [n for n in flow_nodes(f) if target in resolve(n)]
-
-    def downstream(f):
-        """흐름 f 안에서 target 노드 이후로 이어지는 노드들 (가까운 순). 흐름을 넘나들지 않는다."""
-        start = target_nodes(f)
-        out, frontier = [], list(start)
-        while frontier:
-            nxt = []
-            for e in edges(f):
-                if e["from"] in frontier and e["to"] and e["to"] not in out and e["to"] not in start:
-                    out.append(e["to"])
-                    nxt.append(e["to"])
-            frontier = nxt
-        return out
-
-    if symptom == "queue-backlog":
-        for f in hit.values():
-            es = edges(f)
-            brokers = {e["to"] for e in es if e["role"] == "produce"} | {e["from"] for e in es if e["role"] == "consume"}
-            consumers = [e["to"] for e in es if e["role"] == "consume"]
-            producers = [e["from"] for e in es if e["role"] == "produce"]
-            for c in consumers:
-                add(c, "consume — 소비가 안 됨 → 소비자부터")
-            for b in sorted(brokers):
-                add(b, "broker")
-            for e in es:
-                if e["from"] in consumers and e["role"] == "call":
-                    add(e["to"], "소비자의 하류 — 느리면 소비자가 멈춘다")
-            for p in producers:
-                add(p, "produce — 유입·메시지 형식 변화")
-    elif symptom in ("crash", "pending"):
-        # 대상 자체가 먼저, 그다음 대상이 부르는 하류 (의존성이 죽어서 죽는 경우), 나머지
-        add(target, "대상 — 상태·재시작·이벤트")
-        for f in hit.values():
-            tn = target_nodes(f)
-            for e in edges(f):
-                if e["from"] in tn and e["to"]:
-                    add(e["to"], "대상의 하류 — 의존성 실패로 죽는지")
-        # 그 너머 흐름 하류: 요청 단위 증상("카드 생성이 안 돼")은 대상 파드가 멀쩡해도
-        # 흐름 끝(소비자·외부 호출)에서 실패할 수 있다
-        for f in hit.values():
-            for n in downstream(f):
-                add(n, "흐름 하류 — 요청이 여기서 실패하는지")
-    else:
-        for fname, f in hit.items():
-            for n in flow_nodes(f):
-                role = ""
-                for e in edges(f):
-                    if e["to"] == n and e["role"] != "call":
-                        role = e["role"]
-                add(n, ("%s · %s" % (fname, role)) if role else fname)
-    add(target, "대상")
-    # 대상이 흐름 밖이면 경로는 대상 하나
-    return path, sorted(hit)
-
-
-def namespaces_for(names, comps):
-    out = []
-    for n in names:
-        w = str((comps.get(n) or {}).get("workload") or "")
-        if "/" in w:
-            ns = w.split("/", 1)[0]
-            if ns not in out:
-                out.append(ns)
-    return out
-
-
-def plan(cluster, question, since=None, data=None, incidents=None, force_target=None):
+def context(cluster, question, names=None, data=None, incidents=None):
+    """질문(또는 사용자가 지정한 이름들)에 해당하는 지식만: 그 구성요소, 그것을 지나는 흐름, 흐름 위 구성요소,
+    관련 과거 이슈, 정상 패턴. 분석은 이것만 가지고 시작한다."""
     data = data if data is not None else load_flows(cluster)
     incidents = incidents if incidents is not None else load_incidents(cluster)
-    comps = data.get("components") or {}
-    target = force_target if force_target else find_target(question, comps)
-    cands = find_targets(question, comps) if not target else []
-    symptom = find_symptom(question)
+    comps, flows = data.get("components") or {}, data.get("flows") or {}
     notes = []
-    if cands:
-        notes.append("질문이 구성요소 여러 개와 매칭됨 → 조사 시 대상을 직접 선택한다 (%s)" % ", ".join(cands))
-    elif not target:
-        notes.append("질문에서 구성요소를 못 찾았다 → 트리아지 상위 이상 징후를 대상으로 본다 (구성요소 aliases 에 질문 속 단어를 넣으면 다음부터 찾는다)")
-    if not symptom:
-        notes.append("증상 유형을 못 정했다 → 트리아지 결과로 정한다")
-    path, flows_hit = order_path(target, symptom, data) if target else ([], [])
-    names = [p[0] for p in path]
+    if names:
+        picked_c, picked_f, unknown = [], [], []
+        for n in names:
+            (picked_c if n in comps else picked_f if n in flows else unknown).append(n)
+        for n in unknown:
+            hit = node_to_comps(n, comps)
+            picked_c += [h for h in hit if h not in picked_c]
+            if not hit:
+                notes.append("'%s' 는 지식에 없다 → 분석하며 무엇인지 확인하고, 사용자 OK 후 지식에 더한다" % n)
+    else:
+        picked_c, picked_f = mentions(question, comps, flows)
+    hit_f = list(picked_f)
+    for fn, f in flows.items():
+        if fn not in hit_f and any(set(node_to_comps(n, comps)) & set(picked_c) for n in flow_nodes(f)):
+            hit_f.append(fn)
+    scope = list(picked_c)
+    flow_view = {}
+    for fn in hit_f:
+        nodes = flow_nodes(flows[fn])
+        flow_view[fn] = nodes
+        for n in nodes:
+            for c in node_to_comps(n, comps) or []:
+                if c not in scope:
+                    scope.append(c)
+    q = (question or "").lower()
     known = []
     for inc in incidents:
         m = inc["meta"]
         ic = [str(x) for x in (m.get("components") or [])]
-        score = (2 if symptom and m.get("symptom") == symptom else 0) + (2 if target in ic else 0) + len(set(ic) & set(names))
-        if score >= 2:  # 유형이나 대상이 겹치거나, 경로 위 구성요소가 둘 이상 겹칠 때만
-            sig = (m.get("signature") or {}).get("logs") if isinstance(m.get("signature"), dict) else None
-            known.append({"file": inc["file"], "score": score, "date": str(m.get("date") or ""),
-                          "cause": m.get("cause") or "", "signature": sig or []})
-    known.sort(key=lambda k: -k["score"])
-    normal = [n for n in (data.get("normal") or []) if isinstance(n, dict) and n.get("component") in names]
-    ext = [n for n in names if (comps.get(n) or {}).get("external")]
-    for n in ext:
-        sig = (comps.get(n) or {}).get("log_signatures") or []
-        notes.append("%s 는 클러스터 밖: 호출하는 쪽 로그에서 %s 로 판정" % (n, ", ".join('"%s"' % s for s in sig) or "오류 문구"))
-    return {
-        "request": question,
-        "cluster": cluster,
-        "target": target,
-        "candidates": cands,
-        "symptom": symptom,
-        "since": since or find_since(question) or "1h",
-        "flows": flows_hit,
-        "path": [{"component": n, "why": why, "workload": (comps.get(n) or {}).get("workload") or ("클러스터 밖" if (comps.get(n) or {}).get("external") else "?")} for n, why in path],
-        "namespaces": namespaces_for(names, comps),
-        "known": known[:5],
-        "normal": normal,
-        "notes": notes,
-        "created": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+        sig = incident_logs(m)
+        if set(ic) & set(picked_c) or len(set(ic) & set(scope)) >= 2 or any(s.lower() in q for s in sig):
+            known.append({"file": inc["file"], "date": str(m.get("date") or ""), "cause": m.get("cause") or "",
+                          "components": ic, "logs": sig})
+    normal = [n for n in data.get("normal") or [] if isinstance(n, dict) and n.get("component") in scope]
+    if not picked_c and not picked_f:
+        notes.append("질문에서 지식 속 구성요소·흐름을 못 찾았다 → 어느 구성요소/흐름인지 사용자에게 묻는다 "
+                     "(답을 들으면 그 말을 별명으로 더하자고 제안)")
+    for n in scope:
+        c = comps.get(n) or {}
+        if not c.get("workload") and not c.get("external"):
+            notes.append("%s: 워크로드를 모른다 → 클러스터에서 찾으면 지식에 더하자고 제안" % n)
+    return {"request": question, "cluster": cluster, "asked": picked_c, "flows": flow_view,
+            "components": {n: comps.get(n) or {} for n in scope}, "incidents": known, "normal": normal, "notes": notes}
 
 
-def plan_text(p):
-    lines = ["요청: %s" % p["request"],
-             "대상 %s · 유형 %s · 최근 %s%s" % (p["target"] or "?", p["symptom"] or "?", p["since"],
-                                           (" · 흐름 %s" % ", ".join(p["flows"])) if p["flows"] else "")]
-    if p["path"]:
-        lines.append("확인 순서:")
-        for i, h in enumerate(p["path"], 1):
-            lines.append("  %d. %-16s %-34s %s" % (i, h["component"], h["workload"], h["why"]))
-    for k in p["known"]:
-        lines.append("과거 이슈: %s %s%s" % (k["file"], k["cause"], (" (먼저 볼 로그: %s)" % ", ".join(k["signature"])) if k["signature"] else ""))
+def context_text(p):
+    L = ["질문: %s" % p["request"], "말한 것: %s" % (", ".join(p["asked"]) or "(없음)")]
+    for fn, nodes in p["flows"].items():
+        L.append("흐름 %s: %s" % (fn, " → ".join(nodes)))
+    if p["components"]:
+        L.append("구성요소:")
+        for n, c in p["components"].items():
+            where = c.get("workload") or ("클러스터 밖" if c.get("external") else "?")
+            extra = ("  로그: %s" % ", ".join('"%s"' % s for s in c["log_signatures"])) if c.get("log_signatures") else ""
+            L.append("  %s%-18s %s%s" % ("* " if n in p["asked"] else "  ", n, where, extra))
+    for k in p["incidents"]:
+        L.append("과거 이슈 %s %s — %s%s" % (k["date"], k["file"], k["cause"],
+                                          (" (로그: %s)" % ", ".join(k["logs"])) if k["logs"] else ""))
     for n in p["normal"]:
-        lines.append("정상 패턴: %s — %s" % (n.get("component"), n.get("note")))
+        L.append("정상 패턴 %s: %s" % (n.get("component"), n.get("note")))
     for n in p["notes"]:
-        lines.append("참고: %s" % n)
-    return "\n".join(lines)
+        L.append("참고: %s" % n)
+    return "\n".join(L)
+
+
+# ---------- CLI ----------
+
+def _json_arg(s):
+    if s == "-":
+        s = sys.stdin.read()
+    elif s.startswith("@"):
+        s = Path(s[1:]).read_text()
+    return json.loads(s)
 
 
 def main():
@@ -775,56 +684,68 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("list")
-    ip = sub.add_parser("init")
-    ip.add_argument("cluster")
-    ip.add_argument("--example", action="store_true", help="템플릿 예시를 채워서 (연습용)")
+    sub.add_parser("init").add_argument("cluster")
     sub.add_parser("check").add_argument("cluster")
-    pp = sub.add_parser("plan")
-    pp.add_argument("cluster")
-    pp.add_argument("question")
-    pp.add_argument("--since", default=None)
-    pp.add_argument("--yaml", action="store_true", help="계획을 yaml 로")
-    mp = sub.add_parser("merge", help="koa/flowmap.py --shards 후보를 기존 지식에 더한다 (지우거나 고치지 않음)")
-    mp.add_argument("cluster")
-    mp.add_argument("candidates", help="koa/flowmap.py --shards 로 쓴 JSON")
-    mp.add_argument("--pick", default=None, help="더할 후보 흐름 번호 (쉼표, 기본 전부)")
-    mp.add_argument("--apply", action="store_true", help="실제로 저장 (없으면 미리 보기)")
+    cp = sub.add_parser("context")
+    cp.add_argument("cluster")
+    cp.add_argument("question", nargs="?", default="")
+    cp.add_argument("--with", dest="names", default=None, help="이 구성요소·흐름 이름으로 (쉼표)")
+    cp.add_argument("--yaml", action="store_true")
+    for name in ("add", "suggest"):
+        p = sub.add_parser(name)
+        p.add_argument("cluster")
+        p.add_argument("json", help="JSON 문자열, @파일, - (표준입력)")
+        if name == "add":
+            p.add_argument("--dry-run", action="store_true")
+        else:
+            p.add_argument("--title", required=True)
+            p.add_argument("--source", default="분석")
+            p.add_argument("--why", default="")
+    ip = sub.add_parser("incident")
+    ip.add_argument("cluster")
+    ip.add_argument("json")
+    sub.add_parser("suggestions").add_argument("cluster")
+    for name in ("accept", "dismiss"):
+        p = sub.add_parser(name)
+        p.add_argument("cluster")
+        p.add_argument("id")
     a = ap.parse_args()
     try:
         if a.cmd == "list":
             print("\n".join(clusters()) or "(없음) — init <클러스터> 로 만든다")
         elif a.cmd == "init":
-            print("만들었다: %s" % init(a.cluster, a.example))
+            print("만들었다: %s" % init(a.cluster))
         elif a.cmd == "check":
             probs = check(a.cluster)
             for lv, msg in probs:
                 print("%s %s" % ("❌" if lv == "error" else "⚠", msg))
-            if not probs:
-                print("✅ 문제 없음")
+            print("✅ 문제 없음" if not probs else "")
             sys.exit(1 if any(lv == "error" for lv, _ in probs) else 0)
-        elif a.cmd == "plan":
-            p = plan(a.cluster, a.question, a.since)
-            print(yaml.safe_dump(p, allow_unicode=True, sort_keys=False) if a.yaml else plan_text(p))
-        elif a.cmd == "merge":
-            import json
-            cand = json.loads(Path(a.candidates).read_text())
-            pick = [int(x) for x in a.pick.split(",") if x.strip()] if a.pick else None
-            r = merge_candidates(a.cluster, cand, pick, a.apply)
-            print("더할 구성요소 %d: %s" % (len(r["components"]), ", ".join(r["components"]) or "-"))
-            print("더할 흐름 %d:" % len(r["flows"]))
-            for n, nodes in r["flows"]:
-                print("  + %s: %s" % (n, " → ".join(nodes)))
-            for n, why in r["skipped"]:
-                print("  = %s: %s" % (n, why))
-            for lv, msg in r.get("check") or []:
+        elif a.cmd == "context":
+            names = [x.strip() for x in a.names.split(",") if x.strip()] if a.names else None
+            p = context(a.cluster, a.question, names)
+            print(yaml.safe_dump(p, allow_unicode=True, sort_keys=False) if a.yaml else context_text(p))
+        elif a.cmd == "add":
+            r = apply_additions(a.cluster, _json_arg(a.json), apply=not a.dry_run)
+            print(additions_text(r))
+            for lv, msg in r["check"]:
                 print("%s %s" % ("❌" if lv == "error" else "⚠", msg))
-            if r["saved"]:
-                print("저장했다: %s (이전 것은 flows.yaml.bak)" % (cluster_dir(a.cluster) / "flows.yaml"))
-            elif r["flows"] or r["components"]:
-                print("미리 보기다. 저장하려면 --apply")
+            print("저장했다 (이전 것은 flows.yaml.bak)" if r["saved"] else "미리 보기다 (저장 안 함)" if a.dry_run else "")
+        elif a.cmd == "incident":
+            print("기록했다: %s" % write_incident(a.cluster, _json_arg(a.json)))
+        elif a.cmd == "suggest":
+            sid = add_suggestion(a.cluster, a.title, _json_arg(a.json), a.source, a.why)
+            print("제안 %s 를 남겼다" % sid if sid else "남기지 않았다 (이미 지식에 있거나, 같은 제안이 있거나, 전에 버린 것)")
+        elif a.cmd == "suggestions":
+            for p in list_suggestions(a.cluster):
+                print("[%s] %s  (%s, %s)\n%s\n" % (p["id"], p["title"], p["source"], p["created"],
+                                                 "\n".join("    " + x for x in p["preview"].splitlines())))
+        elif a.cmd in ("accept", "dismiss"):
+            r = resolve_suggestion(a.cluster, a.id, a.cmd == "accept")
+            print(additions_text(r) if r else "버렸다 (다시 제안하지 않는다)")
         else:
             ap.print_help()
-    except ValueError as x:
+    except (ValueError, LookupError) as x:
         sys.exit(str(x))
 
 

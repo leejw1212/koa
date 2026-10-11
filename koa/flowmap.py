@@ -15,10 +15,11 @@ DNS 를 조회하지 않는다. Secret 은 읽지 않는다(env 가 Secret 에�
   python3 koa/flowmap.py --source kubectl      # 읽기 전용 kubeconfig 로 kubectl 직접 (KOA_KUBECONFIG / --kubeconfig)
   python3 koa/flowmap.py --ns shop,payment     # 이 네임스페이스 워크로드에서 출발하는 것만
   python3 koa/flowmap.py --no-logs             # 설정만
-  python3 koa/flowmap.py --shards cand.json    # 클러스터 지식 파편 형식으로 후보 저장 → knowledge.py save 로 반영
+  python3 koa/flowmap.py --no-suggest          # 지식 제안을 남기지 않는다 (결과만 본다)
   python3 koa/flowmap.py --json                # 전체 결과 JSON
 
-전체 결과는 <결과 폴더>/<이름>.flowmap/<시각>.json. 클러스터 지식(local/knowledge/)은 바꾸지 않는다.
+전체 결과는 <결과 폴더>/<이름>.flowmap/<시각>.json. 클러스터 지식은 바꾸지 않고, 지식에 아직 없는 흐름만
+'제안'(local/knowledge/<이름>/suggestions.yaml)으로 남긴다. 사용자가 웹이나 대화에서 고른 것만 지식에 들어간다.
 판정 규칙: docs/koa-flowmap.md
 """
 import argparse
@@ -40,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import knowledge as K  # noqa: E402
 from discover import DEFAULT_KUBECONFIG, clean_path, image_name, owner_of, selector_matches  # noqa: E402
 from paths import CATALOG, CLUSTERS  # noqa: E402
-from triage import KubectlSource, McpSource, YLoader  # noqa: E402
+from kube_source import KubectlSource, McpSource, YLoader  # noqa: E402
 
 UTC = dt.timezone.utc
 SKIP_NS = "kube-system,kube-public,kube-node-lease"  # 쿠버네티스 기본 시스템 네임스페이스
@@ -961,7 +962,7 @@ def to_shards(res, asm):
             elif n.startswith("ext:"):
                 comps[d] = {"external": True}
     return {"components": comps,
-            "flows": [{"name": f["name"], "kind": f["kind"], "nodes": f["nodes"]} for f in asm["flows"]],
+            "flows": [{"name": f["name"], "kind": f["kind"], "nodes": f["nodes"], "why": f["confidence"]} for f in asm["flows"]],
             "normal": []}
 
 
@@ -1069,7 +1070,7 @@ def render(cluster, res, asm, secs, src_label, limits, check):
     L.append("\n## 확인 못 한 것")
     for x in limits:
         L.append("- " + x)
-    L.append("\n## 지식 형식 검사 (후보 그대로 저장한다면)")
+    L.append("\n## 지식 형식 검사 (후보를 모두 더한다면)")
     L.append("✅ 문제 없음" if not check else "\n".join("%s %s" % ("❌" if lv == "error" else "⚠", m) for lv, m in check[:12]))
     return "\n".join(L)
 
@@ -1087,7 +1088,7 @@ def main():
     ap.add_argument("--pods", type=int, default=2, help="워크로드마다 로그를 읽을 파드 수 (기본 2)")
     ap.add_argument("--max-logs", type=int, default=150, help="로그를 읽을 컨테이너 최대 수 (기본 150)")
     ap.add_argument("--timeout", type=int, default=120)
-    ap.add_argument("--shards", default=None, help="클러스터 지식 파편 형식으로 후보를 이 파일에 쓴다")
+    ap.add_argument("--no-suggest", action="store_true", help="지식 제안을 남기지 않는다")
     ap.add_argument("--json", action="store_true", help="전체 결과 JSON 을 표준출력으로")
     ap.add_argument("--no-save", action="store_true")
     a = ap.parse_args()
@@ -1168,11 +1169,11 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=1, default=str))
     else:
         print(render(a.cluster, res, asm, secs, src.label, limits, check))
-    if a.shards:
-        Path(a.shards).write_text(json.dumps(shards, ensure_ascii=False, indent=1))
+    if not a.no_suggest and K.NAME_RE.match(a.cluster):
+        ids = K.suggest_from_flowmap(a.cluster, shards, "flowmap %s" % iso(dt.datetime.now(UTC)))
         if not a.json:
-            print("\n후보 파편: %s → `python3 koa/knowledge.py merge %s %s` 로 더할 것을 미리 보고, --apply 로 지식에 더한다"
-                  % (a.shards, a.cluster, a.shards))
+            print("\n지식 제안 %d개를 남겼다 (지식에 아직 없는 흐름만). 웹 '클러스터 지식' → 제안에서 고르거나 "
+                  "`python3 koa/knowledge.py suggestions %s` 로 본다." % (len(ids), a.cluster))
     if not a.no_save:
         out = CLUSTERS / ("%s.flowmap" % a.cluster) / ("%s.json" % dt.datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
         out.parent.mkdir(parents=True, exist_ok=True)

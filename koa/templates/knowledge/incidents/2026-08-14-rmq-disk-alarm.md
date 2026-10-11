@@ -1,6 +1,5 @@
 ---
 date: 2026-08-14
-symptom: queue-backlog          # queue-backlog | latency | errors | crash | pending | log-pipeline | external-dependency
 components: [rabbitmq, order-api]
 signature:                      # 다음에 이 흔적이 보이면 이 이슈를 1순위로 확인
   logs: ["disk resource limit alarm set", "blocked"]

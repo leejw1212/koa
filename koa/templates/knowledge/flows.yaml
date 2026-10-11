@@ -1,4 +1,4 @@
-# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa-analysis-inputs.md
+# KOA 클러스터 지식 — 구조 (분석 경로를 정한다). 설계: docs/koa.md
 schema: koa.knowledge/v1
 cluster: <클러스터>
 

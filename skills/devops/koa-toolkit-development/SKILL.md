@@ -1,7 +1,7 @@
 ---
 name: koa-toolkit-development
 description: "Use when changing, releasing or syncing KOA toolkit."
-version: 1.0.0
+version: 2.0.0
 author: KOA
 license: MIT
 metadata:
@@ -17,7 +17,7 @@ metadata:
 - Adding or fixing a `koa/` tool, catalog entry, doc, SOUL or KOA skill.
 - Pulling new commits from the KOA remote into the installed profile.
 - The user asks to commit/push and update the profile.
-- Merging generated candidates (e.g. flowmap) into `local/knowledge/`.
+- Changing how cluster knowledge is read, added or suggested (`koa/knowledge.py`, `koa/web.py`).
 
 KOA ships as a Hermes profile distribution. Two copies exist:
 - **dev checkout**: the git repo whose remote is `source:` in the installed `distribution.yaml`.
@@ -27,7 +27,7 @@ KOA ships as a Hermes profile distribution. Two copies exist:
 - **installed profile**: `~/.hermes/profiles/<profile>/`. `hermes profile update` overwrites the
   `distribution_owned` paths (SOUL.md, config.yaml template, skills/, koa/, k8s/, terminal/, docs/,
   README.md). Profile state that must survive: `config.yaml` (registered MCP servers), `.env`,
-  `local/` (cluster profiles, knowledge, requests).
+  `local/` (cluster profiles, knowledge, suggestions).
 
 ## Always-on rules
 
@@ -44,12 +44,13 @@ KOA ships as a Hermes profile distribution. Two copies exist:
   the first output line so the user can audit it. Reachability GETs are allowed; requests that make an
   app do work need the user's OK (SOUL).
 - Keep scripts Python 3.9-compatible (macOS system python) and stdlib + PyYAML only.
-- **Results are markdown first, viewable in the web.** A tool that produces a result for people writes a
-  `.md` next to its machine `.json` (same stem, same content as its terminal output), and the web
-  '보고서' tab lists it via `web.py list_reports` + renders it with `koa/web/md.js` (no external libs,
-  escape-first, http(s) links only). When a new tool adds a result location, register it in
-  `list_reports`/`get_report` and keep an id regex there (path traversal guard). Old results that only
-  have JSON are rendered on the fly from the JSON (`triage.render_result`), never by writing files on GET.
+- **Scope stays with the user.** KOA has no cluster-wide sweep, triage or report pipeline (removed in
+  0.2.0 on purpose). Don't add tools that scan everything up front or write report files; new analysis
+  helpers take the component/flow names the user gave (`knowledge.context`) and read only those.
+- **Knowledge changes only through the user.** Tools never edit `local/knowledge/<c>/flows.yaml` on their
+  own: they call `knowledge.add_suggestion` / `suggest_from_flowmap`, and the user accepts in the web UI
+  or tells the agent to `knowledge.py add`. `apply_additions` only adds (merges list fields, fills empty
+  fields, skips flows already inside a known flow) — never deletes or overwrites.
 
 ## Syncing the installed profile from the remote
 
@@ -102,23 +103,20 @@ unasked.
 2. `kill <pid>` (TERM), wait until `kill -0` fails.
 3. Start it again from the profile dir as a background process with `persist_on_release=true` (a server
    the user wants to outlive the chat): `HERMES_HOME=<profile> python3 -u koa/web.py --port <port>`.
-4. Verify with read-only calls: `GET /` → 200; `GET /api/knowledge/<c>` → counts + `check == []`;
-   `POST /api/plan` with header `X-KOA: 1` (POSTs without it get 403) and body
-   `{"cluster","question"}` → the new plan path. `/api/plan` writes nothing; don't use `/api/requests`
-   for verification (it creates a request folder and starts triage).
+4. Verify with read-only calls: `GET /` → 200; `GET /api/knowledge/<c>` → counts, `check == []` and
+   `suggestions`. (All POSTs need header `X-KOA: 1` and write knowledge — don't use them to verify.)
 5. Tell the user to refresh the browser tab.
 
 ## Testing technique
 
 - Web UI changes before release: copy the checkout's `koa/` + `distribution.yaml` into
-  `$HERMES_HOME/cache/scratch/<dir>/`, add an empty `memories/` (makes `paths.INSTALLED` true) and symlink
-  `local` → the profile's `local/`, then run `/usr/bin/python3 -u koa/web.py --port <other port>` there. The
+  `$HERMES_HOME/cache/scratch/<dir>/`, add an empty `memories/` (makes `paths.INSTALLED` true) and **copy** the profile's `local/`
+  (not a symlink: accept/dismiss/incident clicks write knowledge), then run `/usr/bin/python3 -u koa/web.py --port <other port>` there. The
   real 8765 server stays untouched; check with the browser tool + `browser_console` (expect no JS errors),
-  measure table column widths via a console expression. Anything the test server writes lands in the real
-  `local/` through the symlink. Delete the scratch dir afterwards.
-- When re-rendering stored JSON into the live text format, build the stand-in objects with every attribute
-  the render path touches (e.g. `next_steps` reads `pods`/`score`); assert JSON-render == live-render in a
-  test, which catches dropped fields.
+  measure table column widths via a console expression. To see suggestion cards, seed one with
+  `python3 koa/knowledge.py suggest <c> '<json>' --title …` in the copy. Delete the scratch dir afterwards.
+- The browser tool uses the real Chrome profile (`browser.use_real_profile`); if it fails with a profile
+  lock, ask the user to quit Chrome rather than changing that setting.
 - Korean text in narrow table cells breaks one character per line under `overflow-wrap: anywhere`; use
   `word-break: keep-all` + a cell `min-width` for markdown tables.
 - Tests are plain `unittest` files runnable as `python3 koa/tests/test_<x>.py` (no pytest).
@@ -130,31 +128,25 @@ unasked.
   hand-made results (e.g. existing knowledge flows must come back as "already present").
 - Prove a new test catches the bug: copy the installed (old) module over the checkout file, run the
   test (it must fail), restore. A test that also passes on old code tests nothing.
-- Before/after harness for rule changes (e.g. `knowledge.plan`): load the installed and checkout
+- Before/after harness for rule changes (e.g. `knowledge.context`): load the installed and checkout
   modules side by side with `importlib.util.spec_from_file_location` under different names, run the
-  same sample questions against the real `local/knowledge/<c>/flows.yaml` (pass `data=`, `incidents=[]`),
+  same sample questions through `context` against the real `local/knowledge/<c>/flows.yaml` (pass `data=`, `incidents=[]`),
   print only rows whose output changed. Include questions that must NOT change (other flows) as a guard.
   Keep the harness in scratch; show the user the before/after table.
 
-## Knowledge plan rules (`knowledge.py plan`) — pitfalls
+## Knowledge rules (`knowledge.py context` / `add`) — pitfalls
 
-- Flow-node → component matching is substring-based (aliases, `flow_nodes`). A node that equals a
-  component name must resolve to that component only, or `x-worker` leaks into the component whose alias
-  is `x` and drags unrelated flows into the plan. Keep that exact-name short-circuit in `node_to_comps`.
-- Paths must reach the end of the flow for request-level symptoms ("X 생성이 안 돼" → pending/errors):
-  the target pod can be fine while the queue consumer or an external call fails. Walk downstream within
-  each hit flow only (don't hop across flows), and resolve flow-node names (`대상 사이트`) to components so
-  their `normal` patterns attach.
-- After any change, rerun `knowledge.py check <c>` (must stay clean) and the before/after harness.
-
-## Cluster knowledge after a flowmap merge
-
-- Regenerate the candidate file right before merging (an old file reflects old config/logs) and back up
-  `local/knowledge/<c>/`. Re-running the same merge must report "더할 흐름 0" (idempotency check).
-- Merged components arrive without `aliases`, so `plan` finds no target for everyday names ("그라파나
-  접속이 안 돼" → 대상 ?). Add distinct KO+EN aliases right after merging: `K.load_flows(c)` → edit
-  `components[n]["aliases"]` → `K.save_shards(c, {components, flows: [{name, kind, nodes:
-  K._flow_nodes(f)}], normal})`; then `knowledge.py check` and `plan` on one question per new component
-  plus the old sample questions (their plans must not change).
+- Name → component matching is substring-based (aliases, `flow_nodes`). A node that equals a component
+  name must resolve to that component only, or `x-worker` leaks into the component whose alias is `x` and
+  drags unrelated flows into the context. Keep the exact-name short-circuit in `node_to_comps`.
+- `context` returns the named components + every flow through them + the components on those flows +
+  incidents touching them + their normal patterns. It must not grow beyond that (no "related" guesses).
+- `apply_additions` must not invent fields: adding a flow does not add its node names to `flow_nodes`
+  (that silently changed which flows later questions matched). Test with a temp `cluster_dir`.
+- Suggestions are deduplicated by content key and remember dismissals (`suggestions.yaml: dismissed`);
+  a flowmap re-run must leave 0 new suggestions when nothing changed (idempotency check).
+- Components added from flowmap arrive without `aliases`, so everyday names ("그라파나 접속이 안 돼") match
+  nothing. After the user accepts, propose KO+EN aliases for them (one `knowledge.py add`), then run
+  `knowledge.py check <c>` (must stay clean) and `context` on one question per new component.
 - Check what the web UI sees with `GET /api/knowledge/<c>`: count `understood.components/flows/normal`
-  and expect `check == []`; the `text` field is the prose view, not the flow list.
+  and expect `check == []`.

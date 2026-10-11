@@ -95,17 +95,13 @@ python3 koa/flowmap.py                          # 전체 (kubernetes MCP)
 python3 koa/flowmap.py --ns shop,payment        # 이 네임스페이스에서 출발하는 것만
 python3 koa/flowmap.py --no-logs                # 설정만 (로그 읽기도 줄이고 싶을 때)
 python3 koa/flowmap.py --source kubectl         # MCP 등록 전
-python3 koa/flowmap.py --shards cand.json       # 후보를 지식 파편 형식으로
-
-python3 koa/knowledge.py merge <클러스터> cand.json            # 무엇이 더해질지 미리 보기
-python3 koa/knowledge.py merge <클러스터> cand.json --pick 1,3 --apply   # 고른 흐름만 더한다
+python3 koa/flowmap.py --no-suggest            # 지식 제안을 남기지 않는다
 ```
 
-`merge` 가 하는 일:
-- 사람이 쓴 구성요소·흐름·정상 패턴은 지우거나 고치지 않는다.
-- 같은 workload 의 구성요소는 기존 이름으로 바꿔 쓴다.
-- 기존 흐름과 같거나 그 일부인 후보는 건너뛴다.
-- 저장하기 전 파일은 `flows.yaml.bak` 으로 남긴다.
+실행이 끝나면 지식에 아직 없는 흐름·구성요소를 **제안**(`local/knowledge/<클러스터>/suggestions.yaml`)으로 남긴다. 지식 자체는 고치지 않는다.
+- 웹 화면 클러스터 지식 탭 맨 위 제안 카드에서 더하기/버리기, 또는 채팅에서 `knowledge.py suggestions <c>` → `accept <c> <id>`.
+- 더하기는 `knowledge.py add` 와 같다: 사람이 쓴 것은 지우거나 고치지 않고, 같은 workload 는 기존 이름으로 합치고, 기존 흐름과 같거나 그 일부인 흐름은 건너뛴다. 저장 전 파일은 `flows.yaml.bak`.
+- 이미 지식에 있거나 전에 버린 제안은 다시 남기지 않는다. 그래서 바뀐 게 없으면 다시 돌려도 제안 0개다.
 
 결과 JSON 은 `<결과 폴더>/<클러스터>.flowmap/<시각>.json` 에 남는다. 연결마다 근거 목록(where, value, 줄 수, 처음·마지막 시각)이 들어 있다.
 

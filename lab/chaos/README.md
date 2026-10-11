@@ -17,7 +17,7 @@ kind-lab(로컬 kind) 전용. 관리자 컨텍스트로 장애를 넣고, 두 He
 | 클러스터 권한 | 읽기 전용 SA (터미널 kubectl + kubernetes MCP) | 같음 |
 | 그 밖의 MCP | opensearch · prometheus · grafana · argocd | 없음 |
 | SOUL · 스킬 | KOA SOUL, cluster-incident-analysis 등 | 기본 Hermes SOUL, 기본 스킬 |
-| 도구·지식 | `koa/triage.py`, 클러스터 지식(흐름·정상 패턴) | 없음 |
+| 도구·지식 | `koa/knowledge.py context`, 클러스터 지식(흐름·정상 패턴·과거 이슈) | 없음 |
 
 `plain` 프로필은 기본 프로필을 복제(`hermes profile create plain --clone-from default`)한 뒤 MCP 를 kubernetes 하나로 줄이고,
 `skills.external_dirs`(KOA 스킬)를 빼고, 터미널 `KUBECONFIG` 를 읽기 전용으로 고정했다. 메모리에는 "kind-lab, 읽기 전용, 변경 금지" 한 줄만.

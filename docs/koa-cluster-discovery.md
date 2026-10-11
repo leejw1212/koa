@@ -398,7 +398,7 @@ argoproj-labs `argocd-mcp` 대신 쓸 서버를 찾았다. 조건: 하위 경로
 
 추가한 것
 - `koa/flowmap.py`: 요청이 지나는 길 후보를 설정(Ingress·Route·env·args·ConfigMap·NetworkPolicy)과 파드 로그만으로 찾는다. 방법과 판정은 `docs/koa-flowmap.md`.
-- `knowledge.py merge`: 후보를 기존 지식에 더한다. 기본은 미리 보기이고, 사람이 쓴 내용은 고치거나 지우지 않는다.
+- `knowledge.py merge`: 후보를 기존 지식에 더한다 (0.2.0 에서 제안 + `knowledge.py add` 로 바뀜, `docs/koa.md`).
 - `koa/tests/`: 클러스터 없이 도는 규칙 검사.
 
 kind-lab 결과 (MCP, 약 10초)

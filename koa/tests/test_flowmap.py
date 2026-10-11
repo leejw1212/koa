@@ -27,7 +27,7 @@ def pod(ns, name, owner_kind, owner, labels, ip, containers, init=None, phase="R
 
 
 class FakeSource:
-    """triage.KubectlSource 와 같은 모양 — 메모리 안 객체만 돌려준다."""
+    """kube_source.KubectlSource 와 같은 모양 — 메모리 안 객체만 돌려준다."""
     label = "fake"
     registered = True
 

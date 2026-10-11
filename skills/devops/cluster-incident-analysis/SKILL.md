@@ -1,121 +1,102 @@
 ---
 name: cluster-incident-analysis
-description: "Use when diagnosing K8s incidents or onboarding a cluster."
-version: 1.0.0
-author: Hermes Agent
+description: "Use when analyzing a K8s problem the user names in KOA."
+version: 2.0.0
+author: KOA
 license: MIT
 metadata:
   hermes:
-    tags: [kubernetes, incident, root-cause, opensearch, fluentd, mcp, koa, read-only, discovery]
-    related_skills: [kubernetes-agent-access, hermes-mcp-servers, systematic-debugging]
+    tags: [kubernetes, incident, root-cause, koa, read-only, knowledge]
+    related_skills: [koa-cluster-discovery, kubernetes-agent-access, hermes-mcp-servers]
 ---
 
 # Cluster incident analysis (KOA)
 
-KOA is the user's K8s ops-analysis agent (toolkit in `$HERMES_HOME/koa/`, repo github.com/leejw1212/koa). The agent diagnoses a
-cluster it does not own, using only read-only access. This skill covers the analysis workflow and
-the onboarding step that comes before it: discovering what the cluster offers and wiring MCP servers
-(`koa-cluster-discovery` skill; design notes in `references/cluster-discovery.md`). Adding lab components (Prometheus/Grafana, ...) to exercise
-those paths on kind: `references/kind-lab-fixtures.md`.
-Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wiring: `hermes-mcp-servers`.
+KOA analyzes only what the user names, using the cluster knowledge in `local/knowledge/<cluster>/`, and
+grows that knowledge with what each analysis teaches — only after the user's OK. Onboarding a new
+cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `references/kind-lab-fixtures.md`.
 
 ## When to Use
 
-- The user reports a cluster/log-pipeline symptom (logs stopped, pods restarting, queue backing up)
-  and wants the cause.
-- A new cluster is connected and KOA must discover what it can use, or `koa/discover.py` /
-  `koa/plan.py` / `koa/catalog.yaml` need changes.
-- The user asks how to make the agent's root-cause analysis faster or more accurate.
+- The user names a component or flow and a symptom ("rmq 소비가 안 돼", "카드 만들기 흐름이 느려") and wants the cause.
+- The user asks to record/correct what KOA knows about a cluster (components, flows, normal patterns, incidents).
 
 ## Always-on rules
 
-- **Analyze only through the read-only path**: the kubernetes/opensearch MCP tools, or terminal
-  `kubectl` with `~/.kube/hermes-readonly.yaml` (same SA as the MCP). Never `~/.kube/config` (admin).
-  The point is to exercise the system being built, so admin shortcuts invalidate the exercise.
-- **Reachability checks are allowed; no writes or test traffic without asking.** A GET on a
-  health/readiness path or a backend's status endpoint (what `discover.py --probe` and MCP probes do)
-  is fine. Requests that make the app do work (`curl` with a marker request id, POSTs, load) are writes
-  and change the evidence — if a hypothesis can only be confirmed that way, say so and ask, or ask the
-  user to send it.
-- **Filter before it enters context.** `kubectl_logs` returns raw lines (a single web pod's healthz
-  spam floods the context). Always pass `since`/`tail`; prefer terminal kubectl with `grep -v`,
-  `wc -l`, `jsonpath` when you need counts or exclusions.
-- **Say what you could not verify.** If the cluster lacks a signal (no metrics, short event TTL,
-  no heartbeat), state the conclusion as an inference and name the missing signal.
-- **KOA never changes the target cluster.** Each cluster's signal stack (metrics, log schema, event
-  retention) is owned by its operators; KOA controls discovery, MCP tools, runbooks, process and
-  evaluation. Answer improvement questions at that layer; report cluster gaps as analysis limits with
-  workarounds, never as changes to make.
-- **Go step by step.** The user prefers one verified increment at a time (build → run on kind-lab →
-  document in `docs/` → commit) over a large plan executed at once; stop and summarize at each step.
-  After each code change to `koa/`, re-run discover/plan on kind-lab and update
-  `docs/koa-cluster-discovery.md` (bugs found, re-run results) in the same commit (dev checkout).
-- **Lab changes vs. analysis.** Read-only rules govern *analysis*. When the user explicitly asks to
-  install/change something in the local kind lab, do it directly with the admin context (helm/kubectl)
-  — no detour through GitOps repos — and keep values files in the repo's `lab/`. This applies only
-  to the user's own kind lab, never to a cluster KOA is analyzing.
-- Reply in Korean, plain claims, tables for evidence; end with what's left / the next decision.
+- **Scope = what the user named.** No cluster-wide sweeps (all pods, all events, all namespaces). Touch
+  only the components in the context slice. If the evidence points outside it, say so and ask before widening.
+- **Read-only path only**: the kubernetes/opensearch/... MCP tools, or terminal `kubectl` with
+  `~/.kube/hermes-readonly.yaml`. Never `~/.kube/config`. Reachability GETs are fine; requests that make
+  an app do work need the user's OK.
+- **Knowledge changes need the user's OK.** Never edit `local/knowledge/` without it; unconfirmed findings
+  go to suggestions.
+- **Filter before it enters context.** `kubectl_logs` returns raw lines; always pass `since`/`tail`; prefer
+  terminal kubectl with `grep -v`, `wc -l`, `jsonpath` when you need counts or exclusions.
+- **Say what you could not verify.** Missing signal (no metrics, short event TTL, no heartbeat) → state the
+  conclusion as an inference and name the missing signal.
+- Reply in Korean, plain claims, tables for evidence; end with the knowledge proposal / next decision.
 
 ## Procedure
 
-0. **Request from the web UI**: when the user pastes "local/requests/<cluster>/<id>/request.yaml 의 조사 요청을
-   분석해줘", read that file first. It is the investigation plan already built from cluster knowledge
-   (`koa/knowledge.py plan`): target, symptom, `path` (hops in check order), `known` past incidents (check their
-   log signatures first), `normal` patterns. `triage.txt` in the same folder is the triage already run for it
-   (don't re-run unless it failed or is stale). Follow the steps below along that path, then write the final
-   report (cause point, evidence table, what could not be verified) to `report.md` in that folder — the web UI
-   shows it — and give the same summary in chat. Cluster knowledge itself: `local/knowledge/<cluster>/`.
-0b. **Request in chat (no request.yaml)**: if `local/knowledge/<cluster>/flows.yaml` exists, build the same plan
-   first: `python3 koa/knowledge.py plan <cluster> "<사용자 질문 그대로>" [--since 3h]`. Show its first lines
-   (target · symptom · since · flows, check order) at the top of your first reply so the user can correct the
-   reading. Then work in this order: `known` past incidents first (grep their log signatures) → walk `path`
-   in order → judge each hop against `normal` before calling it abnormal (a matching normal pattern = not
-   the cause; say so). If the plan has `candidates` or no target, run triage first and take the top anomaly
-   on the path; mention the miss so the user can add aliases. Without knowledge, skip to step 1.
-   In the report, name every place where the knowledge didn't match the cluster (missing workload,
-   flow that doesn't exist) — wrong knowledge means a wrong path.
-   After the user confirms a cause, offer a draft `incidents/<date>-<slug>.md` (date, symptom, components,
-   signature.logs, cause, found_by + one paragraph); write it only after they OK it.
-1. **Read the cluster profile first** (`$HERMES_HOME/local/clusters/<name>.yaml`, or `clusters/` in a
-   dev checkout). If missing or stale, run discovery (`koa-cluster-discovery`). It tells you which tools exist, log index/fields, pipeline
-   shape, and known gaps — so you don't re-derive structure from configmaps every time.
-2. **Scope the impact**: what, since when (exact UTC timestamp), which namespaces/nodes. Convert
-   times — fluentd/OpenSearch log in UTC, the user speaks KST. Don't stop to ask: default to the last
-   hour and the whole cluster.
-3. **Triage before any single query**: `python3 koa/triage.py [--since 3h] [--at <UTC>] [--ns a,b]`.
-   It sweeps nodes, pods, events, workloads, endpoints and rollouts through the kubernetes MCP in one go
-   (≈3 s) and prints ranked anomalies with onset, evidence and the change right before each, a change
-   timeline, ready-to-run next queries, and what it could not see. Paste its tables to the user right
-   away with your first 2–3 hypotheses (an early read beats a late perfect answer), then verify. Its
-   JSON lives in `<results>/<cluster>.triage/` — reuse it instead of re-listing pods.
-   Its change timeline includes NetworkPolicy create/edit with the allow list — when pods are healthy but a
-   call times out (callback, DB), check that row first.
-   It folds same-minute restarts on one node into a single "host event" row and demotes pods on
-   NotReady nodes; trust that grouping before chasing each workload. With the MCP, ConfigMap edits
-   show only as creation (no managedFields); `--source kubectl` sees edits.
-4. **Check for a cluster-wide event at that time first**: pod `RESTARTS (Xh ago)` all the same age,
-   container `lastState.terminated` with exit 255/`Unknown` at one timestamp, DNS errors
-   (`Resolv::ResolvError`, `Name or service not known`) right after → host/cluster restart, not a
-   component fault. On kind, a Docker/Mac restart looks exactly like this.
-5. **Walk the pipeline hop by hop**, comparing what each hop should have vs. what arrived.
-   For a log pipeline (app → forwarder → aggregator → OpenSearch):
-   - OpenSearch: `max(@timestamp)` + terms agg by `pod` with `max` per pod — which sources stopped.
-   - Source: count lines per pod since that timestamp (`kubectl logs --since-time=... | wc -l`).
-   - **Subtract what the pipeline drops on purpose** (read the forwarder filters: healthz exclude,
-     path/namespace scope). Source lines that are all filtered = no real traffic, not a stall.
-   - Forwarder/aggregator logs: buffer flush failures, `retry succeeded`, `detached/recovered
-     forwarding server`. Recovered + no later errors = pipeline healthy.
-   - Only declare "collection stopped" when unfiltered source lines exist that never reached the index.
-6. **Rank 3–5 hypotheses** with the evidence for/against each before concluding.
-7. **Report**: conclusion + confidence, evidence table (source/tool per row), timeline, what could
-   not be verified, recommended actions (not executed).
+1. **Which cluster**: `python3 koa/knowledge.py list`. One → use it. Several → the read-only kubeconfig's
+   current context minus `-readonly`, or ask.
+2. **Pull the slice**: `python3 koa/knowledge.py context <cluster> "<사용자 질문 그대로>"`
+   (`--with a,b` when the user named things explicitly or corrected you). Show its first lines (asked
+   components, flows) at the top of your first reply so the user can correct the reading.
+   - Nothing matched → ask which component/flow they mean (offer the knowledge's component names). Their
+     answer is a new alias: include it in the proposal at the end.
+   - A name the knowledge doesn't have → find just that workload read-only (`kubectl get deploy,sts,ds -A
+     | grep <name>`), analyze it, and propose adding it.
+3. **Past incidents first**: for each `과거 이슈` in the slice, grep its log lines in the named components
+   (`kubectl logs --since=1h ... | grep -c "<line>"`). A hit is the strongest lead.
+4. **Walk the flow hop by hop** over the components in the slice, in flow order (for a queue backlog start
+   at the consumer, then broker, then the consumer's downstream, then the producer). Per hop: pods
+   (ready/restarts/lastState), recent events for those pods, logs (`since`, `tail`, the component's
+   `로그` lines), and the call to the next hop. Judge each against its `정상 패턴` before calling it
+   abnormal — a matching normal pattern means "not the cause", say so.
+   The cause point is where the flow turns from normal to abnormal.
+5. **Hypotheses**: 2–3 with evidence for/against; share the early read, then confirm.
+6. **Report**: conclusion + confidence, evidence table (hop · what was checked · tool · result), what could
+   not be verified, where the knowledge didn't match the cluster (missing workload, wrong hop).
+7. **Knowledge proposal** — always end with it, even if empty ("새로 알게 된 것 없음"):
+
+   | 종류 | 내용 | 근거 |
+   |---|---|---|
+   | 구성요소 / 별명 / 로그 문구 / 흐름 / 정상 패턴 / 과거 이슈 | … | 어디서 봤는지 |
+
+   Ask "이대로 지식에 더할까요?" After OK, write exactly the approved rows:
+   ```bash
+   python3 koa/knowledge.py add <c> '{"components": {"rabbitmq": {"aliases": ["래빗"], "log_signatures": ["disk resource limit alarm set"]}},
+                                     "flows": [{"name": "카드-만들기", "nodes": ["linkcard-web", "rabbitmq", "linkcard-worker"]}],
+                                     "normal": [{"component": "linkcard-worker", "note": "…"}]}'
+   python3 koa/knowledge.py incident <c> '{"date": "2026-10-11", "components": ["rabbitmq"], "logs": ["…"], "cause": "…", "found_by": "…", "body": "한 문단"}'
+   ```
+   `add` only adds (merges list fields, fills empty fields, skips flows already known); show its output.
+   Rows the user declines but that may matter later → `knowledge.py suggest <c> '<json>' --title "…" --why "…"`
+   only if they say "나중에". Use `--dry-run` first when unsure what `add` will change.
+8. **Self-improvement** (no OK needed, tell the user in one line): a cluster-independent analysis lesson →
+   patch the Pitfalls of this skill (in the dev checkout `~/hermes-config/skills/...` if it exists, so it
+   survives profile updates); a stable user/environment fact → memory. Never put cluster names/flows there.
+
+## Flow discovery on request
+
+"흐름 찾아줘" → `python3 koa/flowmap.py [--ns a,b]` (config + logs only). It saves flows not yet in the
+knowledge as suggestions; show its table and tell the user to pick them in the web UI (클러스터 지식 → 제안)
+or say which to add (`knowledge.py suggestions <c>`, then `accept <c> <id>` per the user's choice).
 
 ## Pitfalls
 
-- "No documents since T" in a log index is ambiguous: traffic-free periods and stalled shippers look
-  identical without a heartbeat. Step 4's source-vs-index comparison is the read-only way to tell.
-- `fieldSelector status.phase!=Running` misses CrashLoopBackOff; list all pods and read RESTARTS.
-- mcp-server-kubernetes 4.1.9 `kubectl_get` with `output: json` on a list returns only name/namespace/
-  status/createdAt (it reshapes it). Use `output: yaml` for full objects (triage.py does). Its default
-  output cap is 1 MB (`SPAWN_MAX_BUFFER`); triage raises it for its own process only.
+- A cluster-wide event looks like many faults: pod `RESTARTS (Xh ago)` all the same age, `lastState.terminated`
+  exit 255/`Unknown` at one timestamp, DNS errors right after → host/cluster restart. On kind, a Docker/Mac
+  restart looks exactly like this. Check the restart times of the components in scope before chasing each.
+- "No documents since T" in a log index is ambiguous: no traffic and a stalled shipper look the same without a
+  heartbeat. Compare source lines (`kubectl logs --since-time=… | wc -l`, minus what the forwarder filters on
+  purpose) with what reached the index.
+- `fieldSelector status.phase!=Running` misses CrashLoopBackOff; read RESTARTS and container state.
+- mcp-server-kubernetes 4.1.9 `kubectl_get` with `output: json` on a list returns only name/namespace/status;
+  use `output: yaml` for full objects. Its default output cap is 1 MB (`SPAWN_MAX_BUFFER`) — scope by namespace.
+- Pods healthy but calls time out (callback, DB) → check NetworkPolicies in the namespaces in scope
+  (`kubectl get netpol -n <ns> -o yaml`, look at creation/edit time).
+- With the MCP, ConfigMap edits show only as creation (no managedFields); terminal kubectl
+  `--show-managed-fields` shows edit times.
 - Remaining k8s events are not a retention measure — read kube-apiserver `--event-ttl` (default 1h).
