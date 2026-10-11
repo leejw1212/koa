@@ -84,6 +84,23 @@ def _np_site_blocked():
     }
 
 
+def _np_worker_egress():
+    """워커의 나가는 트래픽을 web·slowsite 로만 허용 → DNS(kube-dns)가 막혀 'Temporary failure in name resolution'.
+    지식의 정상 패턴('노드 재시작 직후 이름을 못 찾아 재연결하다 정상')과 같은 문구라 정상으로 넘기기 쉽다.
+    재시작이 없고, 계속되며, 워커만 그렇다(web 은 이름을 잘 찾는다)."""
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "linkcard-worker-egress", "namespace": "linkcard", "labels": {"app": "linkcard-worker"}},
+        "spec": {
+            "podSelector": {"matchLabels": {"app": "linkcard-worker"}},
+            "policyTypes": ["Egress"],
+            "egress": [{"to": [{"podSelector": {"matchLabels": {"app": "linkcard-web"}}},
+                               {"podSelector": {"matchLabels": {"app": "slowsite"}}}]}],
+        },
+    }
+
+
 def _redis(*cmd):
     return kubectl("-n", "linkcard", "exec", "redis-0", "--", "redis-cli", *cmd)
 
@@ -139,6 +156,23 @@ SCENARIOS = {
         "inject": lambda: _redis("CONFIG", "SET", "maxmemory", "2mb"),
         "recover": lambda: _redis("CONFIG", "SET", "maxmemory", "0"),
         "check": lambda: _redis("CONFIG", "GET", "maxmemory").split()[-1] != "0",
+    },
+    # 정상 패턴과 같은 겉모습: 'Temporary failure in name resolution' 은 지식에 '재시작 직후면 정상' 으로 적혀 있다.
+    "worker-dns-blocked": {
+        "symptom": "링크카드 카드가 한참 걸리다가 실패하거나 결과가 안 나와요. 아까부터 계속 그래요. 원인 찾아줘.",
+        "answer": {
+            "cause": "linkcard 네임스페이스에 NetworkPolicy linkcard-worker-egress 가 생겨 linkcard-worker 의 나가는 트래픽을 "
+                     "linkcard-web·slowsite 파드로만 허용 → DNS(kube-dns 53) 가 막혀 워커가 slowsite·linkcard-web 이름을 못 찾음 "
+                     "(Temporary failure in name resolution) → 대상 페이지 재시도 후 실패, 결과 콜백 실패.",
+            "where": "worker 로그 job.retry_scheduled / job.report_failed 'Temporary failure in name resolution' 이 재시작 없이 계속; "
+                     "web 은 정상; kubectl get networkpolicy -n linkcard (Egress). 정상 패턴(재시작 직후 DNS)과 구분: 재시작 없음·지속",
+            "fix": "NetworkPolicy 에 kube-system/kube-dns 53 UDP/TCP 와 rabbitmq 허용 추가 (또는 정책 제거)",
+        },
+        "keywords": [["networkpolicy", "network policy", "네트워크 정책", "linkcard-worker-egress"],
+                     ["dns", "name resolution", "이름 해석", "53", "egress"]],
+        "inject": lambda: kubectl("apply", "-f", "-", data=json.dumps(_np_worker_egress())),
+        "recover": lambda: kubectl("-n", "linkcard", "delete", "networkpolicy", "linkcard-worker-egress", "--ignore-not-found"),
+        "check": lambda: "linkcard-worker-egress" in kubectl("-n", "linkcard", "get", "networkpolicy", "-o", "name"),
     },
 }
 
