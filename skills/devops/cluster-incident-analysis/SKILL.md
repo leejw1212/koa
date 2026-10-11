@@ -88,6 +88,8 @@ Access setup (SA, kubeconfig, terminal lock): `kubernetes-agent-access`. MCP wir
    timeline, ready-to-run next queries, and what it could not see. Paste its tables to the user right
    away with your first 2–3 hypotheses (an early read beats a late perfect answer), then verify. Its
    JSON lives in `<results>/<cluster>.triage/` — reuse it instead of re-listing pods.
+   Its change timeline includes NetworkPolicy create/edit with the allow list — when pods are healthy but a
+   call times out (callback, DB), check that row first.
    It folds same-minute restarts on one node into a single "host event" row and demotes pods on
    NotReady nodes; trust that grouping before chasing each workload. With the MCP, ConfigMap edits
    show only as creation (no managedFields); `--source kubectl` sees edits.

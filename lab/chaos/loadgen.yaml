@@ -1,0 +1,46 @@
+# 실험용 사용자 트래픽 — 인그레스를 거쳐 링크카드 "카드 만들기"를 몇 초마다 보낸다.
+# 요청이 없으면 장애가 나도 실패가 생기지 않아 로그에 증거가 남지 않는다.
+# lab 전용 (관리자 컨텍스트로 적용). GitOps 밖이다.
+#   kubectl --kubeconfig ~/.kube/config --context kind-lab apply -f lab/chaos/loadgen.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traffic
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: traffic
+  labels: {app: loadgen}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: loadgen}
+  template:
+    metadata:
+      labels: {app: loadgen}
+    spec:
+      containers:
+      - name: loadgen
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        env:
+        - {name: TARGET, value: "http://ingress-nginx-controller.ingress-nginx.svc/linkcard/api/cards"}
+        - {name: INTERVAL, value: "6"}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          # 사용자가 링크 미리보기를 만드는 흉내. 대상은 클러스터 안의 slowsite (바깥 인터넷을 두드리지 않는다).
+          i=0
+          while true; do
+            i=$((i+1))
+            ms=$(( (i % 5) * 150 + 100 ))
+            out=$(wget -q -O - -T 5 --header 'Host: localhost' --header 'Content-Type: application/json' \
+                  --post-data "{\"url\":\"http://slowsite:8080/article/$i?ms=$ms\"}" "$TARGET" 2>&1)
+            echo "$(date -u +%FT%TZ) req=$i $out" | cut -c1-200
+            sleep "$INTERVAL"
+          done
+        resources:
+          requests: {cpu: 5m, memory: 8Mi}
+          limits: {memory: 32Mi}

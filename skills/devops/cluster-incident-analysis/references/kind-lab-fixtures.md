@@ -18,6 +18,16 @@ and compare before/after (components, probes, gaps, plan items).
 - Verify: pods Ready, health URLs 200, Prometheus `/api/v1/targets` all `up` (print `lastError`
   for any down target).
 
+## Fault injection + KOA vs plain comparison (`lab/chaos/`)
+- `loadgen.yaml` (traffic/loadgen, user traffic every 6 s — without requests a fault leaves no log evidence),
+  `chaos.py inject|status|reveal|recover` (answer kept outside the repo in `~/.koa-chaos/`, only the symptom is
+  printed), `compare.py` (same question to profiles `koa` and `plain` in parallel → `~/.koa-chaos/runs/<t>/summary.md`).
+- `plain` = clone of default with only the kubernetes MCP, no KOA skills, read-only KUBECONFIG, same model/reasoning.
+  A clone inherits `service_tier: fast` from default; drop it (429 out of credits benches the shared Anthropic
+  credential → `hermes auth reset anthropic`).
+- Pick scenarios where a one-shot `kubectl get <kind> -A` doesn't give the answer; otherwise plain wins on cost.
+- Inject objects Argo CD doesn't manage (selfHeal reverts managed ones); no answer-revealing names.
+
 ## kube-prometheus-stack on kind (known-good values)
 Template in repo: `lab/monitoring/values.yaml` (chart `prometheus-community/kube-prometheus-stack`).
 - `kubeEtcd/kubeScheduler/kubeControllerManager/kubeProxy: {enabled: false}` — kind binds them to

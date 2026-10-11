@@ -37,7 +37,7 @@ python3 koa/triage.py --json                   # 전체 결과 JSON
 | 이벤트 | Warning 을 대상·사유로 묶어 근거로 붙임. 묶일 곳이 없으면 사유별 점수로 따로 | |
 | 동시 재시작 | 같은 1~2분에 워크로드 3개 이상 재시작 → "노드·호스트 사건" 한 줄 95. 재시작 말고 다른 이상이 없는 워크로드는 이 줄로 접는다 | |
 | NotReady 노드 위 파드 | 노드 사건의 결과로 보고 40 으로 낮추고 노드 쪽 근거로 돌린다 | |
-| 변경 (최근 6h) | Deployment 새 ReplicaSet(이미지 전후 비교, 같으면 "설정·env 변경"), StatefulSet·DaemonSet revision, 노드 추가, 이상 있는 네임스페이스의 ConfigMap | |
+| 변경 (최근 6h) | Deployment 새 ReplicaSet(이미지 전후 비교, 같으면 "설정·env 변경"), StatefulSet·DaemonSet revision, 노드 추가, 이상 있는 네임스페이스의 ConfigMap, NetworkPolicy 생성·수정(허용 목록 요약: 대상 파드 · 허용 출처:포트) | |
 | 직전 변경 | 이상 징후마다 같은 네임스페이스에서 시작 시각 직전 변경을 붙인다 (자기 워크로드 변경 우선, +10/+5) | |
 
 "시작"은 근거 시각 중 가장 이른 것: 재시작 종료 시각, Ready 전환 시각, 첫 Warning 이벤트 시각.
@@ -93,6 +93,17 @@ kind-lab 에서는 실제 장애(잘못된 이미지 태그, 낮은 limits, 레�
 | 큰 클러스터에서 출력 한도 | MCP 기본 `SPAWN_MAX_BUFFER` 1MB | 트리아지가 띄우는 MCP 프로세스에서만 256MB 로 올린다 (Hermes 등록 설정은 그대로) |
 | ConfigMap 수정 시각이 안 보인다 | kubectl 기본 출력이 `managedFields` 를 뺀다. MCP 에서 바꿀 방법이 없다 | MCP 에서는 생성 시각만 보고 "확인 못 한 것"에 적는다. `--source kubectl` 은 `--show-managed-fields` 로 수정도 본다 |
 | 재시작 시작 시각이 이틀 전으로 나옴 | `lastState.terminated.startedAt`(그 컨테이너가 뜬 시각)을 썼다 | 종료 시각(`finishedAt`)으로 바꿈 |
+
+## 5-1. NetworkPolicy 를 변경으로 본다 (2026-10-11)
+
+`lab/chaos` 의 `callback-blocked`(linkcard-web 인입을 ingress-nginx 로만 막는 정책 → 워커 콜백 타임아웃)에서
+트리아지가 "변경 0건"이라고 했다. 파드·이벤트는 멀쩡하고 통신만 끊기는 장애라, 정책 생성이 유일한 단서였다.
+
+- 이제 NetworkPolicy 를 항상 읽고(객체가 작다) 기간 안의 생성·수정을 변경 타임라인에 넣는다.
+- 한 줄에 허용 목록을 요약한다. 정책이 생기면 적히지 않은 통신이 모두 막히므로, 무엇이 허용됐는지가 곧 무엇이 막혔는지다.
+  예: `NetworkPolicy/linkcard-web-allow-ingress 생성 — 대상 파드 app=linkcard-web · Ingress 허용 ns(kubernetes.io/metadata.name=ingress-nginx):8000`
+- MCP 경로는 ConfigMap 과 같이 생성 시각만 본다(managedFields 없음). 기존 정책 수정은 `--source kubectl`.
+- 검사: `koa/tests/test_triage_changes.py` (예전 코드에서 실패 확인).
 
 ## 6. 한계
 

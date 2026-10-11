@@ -144,7 +144,7 @@ class KubectlSource:
         return False
 
     def list(self, resource, ns=None):
-        extra = ["--show-managed-fields"] if resource == "configmaps" else []
+        extra = ["--show-managed-fields"] if resource in ("configmaps", "networkpolicies.networking.k8s.io") else []
         return self.kube.json("get", resource, *(["-n", ns] if ns else ["-A"]), *extra).get("items") or []
 
 
@@ -175,6 +175,9 @@ def collect(src, namespaces):
                 "daemonsets.apps", "jobs.batch", "services"):
         data[res] = get(res, namespaces) or []
     data["controllerrevisions.apps"] = get("controllerrevisions.apps", namespaces, optional=True) or []
+    # 파드가 멀쩡한데 통신만 끊기는 장애(콜백·DB 연결 타임아웃)는 NetworkPolicy 변경이 흔한 원인이다.
+    # 객체가 작아서 이상 여부와 상관없이 늘 읽는다.
+    data["networkpolicies"] = get("networkpolicies.networking.k8s.io", namespaces) or []
     eps = get("endpointslices.discovery.k8s.io", namespaces, optional=True)
     if eps is None:
         eps = get("endpoints", namespaces)
@@ -498,6 +501,14 @@ def analyze(data, at, since, lookback):
         t, what = (max(times), "수정") if times else (ts(m.get("creationTimestamp")), "생성")
         if t and change_start <= t <= at:
             changes.append({"at": t, "ns": m["namespace"], "target": "ConfigMap/%s" % m["name"], "what": what})
+    for np_ in data.get("networkpolicies", []):
+        m = np_["metadata"]
+        times = [x for x in (ts(f_.get("time")) for f_ in m.get("managedFields") or []) if x]
+        created = ts(m.get("creationTimestamp"))
+        t = max(times) if times else created
+        if t and change_start <= t <= at:
+            what = ("생성" if not times or t == created else "수정") + " — " + netpol_summary(np_)
+            changes.append({"at": t, "ns": m["namespace"], "target": "NetworkPolicy/%s" % m["name"], "what": what})
     changes.sort(key=lambda c: c["at"])
 
     # 이상 징후마다 같은 네임스페이스의 직전 변경을 붙인다 (자기 자신 우선)
@@ -514,6 +525,44 @@ def analyze(data, at, since, lookback):
             f.score += 10 if own else 5
 
     return sorted(found.values(), key=lambda f: (-f.score, f.onset or at)), changes, node_down
+
+
+def _labels(sel):
+    """LabelSelector → 'k=v,k2=v2' (없으면 '모든')."""
+    sel = sel or {}
+    parts = ["%s=%s" % kv for kv in sorted((sel.get("matchLabels") or {}).items())]
+    parts += ["%s %s" % (e.get("key"), e.get("operator")) for e in sel.get("matchExpressions") or []]
+    return ",".join(parts) or "모든"
+
+
+def netpol_summary(np_):
+    """NetworkPolicy 한 줄 요약: 적용 대상 파드, 방향, 허용 출처/목적지.
+    정책이 생기면 거기 적히지 않은 통신은 전부 막힌다 — 허용 목록을 보여 줘야 무엇이 막혔는지 짐작할 수 있다."""
+    spec = np_.get("spec") or {}
+    types = spec.get("policyTypes") or ["Ingress"]
+    out = ["대상 파드 %s" % _labels(spec.get("podSelector"))]
+    for typ, key, peer_key in (("Ingress", "ingress", "from"), ("Egress", "egress", "to")):
+        if typ not in types:
+            continue
+        rules = spec.get(key) or []
+        if not rules:
+            out.append("%s 전부 차단" % typ)
+            continue
+        peers = []
+        for r in rules:
+            ports = ",".join(str(p.get("port", "*")) for p in r.get("ports") or []) or "*"
+            for p in r.get(peer_key) or [{}]:
+                if not p:
+                    who = "어디서나"
+                elif "ipBlock" in p:
+                    who = "ip %s" % p["ipBlock"].get("cidr")
+                else:
+                    who = " ".join(x for x in (
+                        "ns(%s)" % _labels(p["namespaceSelector"]) if "namespaceSelector" in p else "",
+                        "pod(%s)" % _labels(p["podSelector"]) if "podSelector" in p else "") if x)
+                peers.append("%s:%s" % (who, ports))
+        out.append("%s 허용 %s" % (typ, "; ".join(peers)))
+    return " · ".join(out)
 
 
 def image_diff(old, new):
@@ -671,6 +720,8 @@ def main():
         limits.append("ConfigMap 변경은 이상 있는 네임스페이스가 없어 보지 않았다")
     elif a.source == "mcp":
         limits.append("ConfigMap 은 생성 시각만 봤다 (kubernetes MCP 출력에 수정 시각(managedFields)이 없다. --source kubectl 이면 수정도 본다)")
+    if a.source == "mcp" and data.get("networkpolicies"):
+        limits.append("NetworkPolicy 는 생성 시각만 봤다 (같은 이유. 기존 정책의 수정은 --source kubectl 로)")
     limits.append("지표·로그 저장소 없이 k8s 상태만 봤다: 지연·오류율 증가처럼 파드가 멀쩡한 장애는 여기 안 보인다")
 
     result = {
