@@ -6,6 +6,12 @@ model:
 agent:
   max_turns: 150
   reasoning_effort: medium
+# 대화가 끝날 때 Hermes 가 뒤에서 스킬을 만들고 고치는 기능(background review)을 끈다.
+# 켜 두면 클러스터 분석과 상관없는 스킬(세션 복구 절차 등)이 사용자 모르게 생긴다.
+# 새 스킬은 KOA 가 내용을 설명하고 사용자가 OK 한 것만 만든다 (SOUL 5번).
+auxiliary:
+  background_review:
+    enabled: false
 # MCP 서버는 싣지 않는다. 클러스터마다 쓸 수 있는 도구가 달라서, 온보딩 때 koa/plan.py 가
 # 탐색 결과를 보고 사용자와 정한 것만 등록한다 (정의는 koa/catalog.yaml).
 mcp_servers: {}

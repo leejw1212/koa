@@ -90,6 +90,8 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`. Lab setup notes: `refe
    it is missing). Don't patch this skill for that: it is shipped and a profile update overwrites it. A stable
    user/environment fact → memory. Never put cluster names/flows there. Both show in the web UI tab
    "KOA 가 배운 것". Lessons that proved general can later be promoted into this skill in the repo.
+   **Never create a new skill without asking.** If something deserves its own skill instead of a lesson line,
+   describe it in two or three lines (name, when it loads, what it says) and create it only after the user's OK.
 
 ## Flow discovery on request
 

@@ -141,6 +141,11 @@ On a machine without the LaunchAgent: copy that plist (paths adjusted) and `laun
   repo; to keep a lesson for every install, promote it into the shipped skill in the checkout.
 - "Skills KOA made or changed" = `koa-learned` ∪ skills in `skills/.curator_ledger.jsonl` ∪ `.usage.json`
   records with `created_by: agent`. Bundled skills (in `.bundled_manifest`) never show unless edited.
+- The shipped `config.yaml` sets `auxiliary.background_review.enabled: false`: the background review fork
+  creates skills unrelated to cluster analysis without asking (it once made a session-recovery skill). New
+  skills need the user's OK (SOUL 5). `hermes profile update` keeps the installed `config.yaml`, so a new
+  config key in the repo must also be applied to existing installs with
+  `env -u HERMES_HOME hermes -p <profile> config set <key> <value>` (never hand-edit or yaml-dump it).
 - Memory files use Hermes' format (`\n§\n` between entries) and lock (`<file>.lock` + flock, write temp +
   `os.replace`). Delete by exact entry text so a concurrent change makes the delete fail instead of removing
   the wrong entry. Memory changes reach the agent only in a new chat (system prompt is frozen per session).
