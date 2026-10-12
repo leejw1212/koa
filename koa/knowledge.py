@@ -16,7 +16,7 @@
   python3 koa/knowledge.py accept|dismiss <클러스터> <id>          # 제안을 지식에 더하기 / 버리기
 
 <json> 모양 (전부 선택):
-  {"components": {"order-api": {"workload": "shop/Deployment/order-api", "kind": "app",
+  {"components": {"order-api": {"workload": "shop/Deployment/order-api", "kind": "app", "theme": "주문",
                                 "aliases": ["주문 API"], "log_signatures": ["Too many connections"]}},
    "flows": [{"name": "주문", "nodes": ["ingress-nginx", "order-api", "orders-db"]}],
    "normal": [{"component": "order-worker", "note": "매일 02:00 배치 때 큐가 쌓였다 빠진다"}]}
@@ -43,7 +43,7 @@ ROLES = ("produce", "consume", "call")
 QUEUE_WORDS = re.compile(r"rabbit|rmq|kafka|sqs|nats|pulsar|queue|큐|^mq$|-mq$|activemq|redis-stream", re.I)
 QUOTED = re.compile(r"[\"“”'‘’`]([^\"“”'‘’`]{4,120})[\"“”'‘’`]")
 LIST_FIELDS = ("aliases", "log_signatures")
-SCALAR_FIELDS = ("workload", "kind", "tier", "external")
+SCALAR_FIELDS = ("workload", "kind", "tier", "external", "theme")
 HEADER = "# KOA 클러스터 지식 — 구성요소 · 흐름 · 정상 패턴. 웹 화면이나 knowledge.py add 로 고친다.\n"
 
 
@@ -714,6 +714,9 @@ def check(cluster, data=None):
             if k in owner and owner[k] != name:
                 out.append(("warn", "'%s' 가 %s 와 %s 둘 다의 이름이다 (질문에서 못 가린다)" % (a, owner[k], name)))
             owner[k] = name
+    for t in themes(comps):
+        if t.lower() in owner:
+            out.append(("warn", "테마 '%s' 가 구성요소 %s 의 이름과 같다 (질문에서 못 가린다)" % (t, owner[t.lower()])))
     for fname, f in (data.get("flows") or {}).items():
         es = edges(f)
         if not es:
@@ -742,10 +745,23 @@ def check(cluster, data=None):
 
 # ---------- 꺼내기: 질문에 해당하는 지식만 ----------
 
+def themes(comps):
+    """테마 → 그 테마의 구성요소 목록 (적힌 순서). 테마는 구성요소마다 하나 ('결제', '인증' 같은 꼬리표)."""
+    out = {}
+    for n, c in (comps or {}).items():
+        t = str((c or {}).get("theme") or "").strip()
+        if t:
+            out.setdefault(t, []).append(n)
+    return out
+
+
 def mentions(text, comps, flows=None):
-    """질문에 나온 구성요소·흐름 (나온 순서). 긴 이름부터 맞추고 맞춘 자리는 지워서 'shop-worker' 가 'shop' 으로 또 잡히지 않게."""
+    """질문에 나온 구성요소·흐름 (나온 순서). 긴 이름부터 맞추고 맞춘 자리는 지워서 'shop-worker' 가 'shop' 으로 또 잡히지 않게.
+    테마 이름을 말하면 그 테마의 구성요소 전부 ("결제 쪽이 이상해")."""
     low = (text or "").lower()
     terms = []
+    for t in themes(comps):
+        terms.append((t.lower(), "t", t))
     for n, c in (comps or {}).items():
         for a in [n] + list((c or {}).get("aliases") or []):
             if str(a).strip():
@@ -762,10 +778,12 @@ def mentions(text, comps, flows=None):
         found.append((i, kind, name))
     found.sort()
     comps_hit, flows_hit = [], []
+    by_theme = themes(comps)
     for _, kind, name in found:
-        lst = comps_hit if kind == "c" else flows_hit
-        if name not in lst:
-            lst.append(name)
+        for n in (by_theme.get(name, []) if kind == "t" else [name]):
+            lst = flows_hit if kind == "f" else comps_hit
+            if n not in lst:
+                lst.append(n)
     return comps_hit, flows_hit
 
 
@@ -778,7 +796,11 @@ def context(cluster, question, names=None, data=None, incidents=None):
     notes = []
     if names:
         picked_c, picked_f, unknown = [], [], []
+        by_theme = themes(comps)
         for n in names:
+            if n not in comps and n in by_theme:
+                picked_c += [x for x in by_theme[n] if x not in picked_c]
+                continue
             (picked_c if n in comps else picked_f if n in flows else unknown).append(n)
         for n in unknown:
             hit = name_to_comps(n, comps)

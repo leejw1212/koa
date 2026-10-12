@@ -65,6 +65,15 @@ class Context(unittest.TestCase):
         self.assertEqual(K.node_to_comps("결제 대행", DATA["components"]), [])   # 별명은 흐름 칸이 아니다
         self.assertEqual(K.node_to_comps("shop", DATA["components"]), [])       # 부분 문자열로 붙지 않는다
 
+    def test_theme_picks_its_components(self):
+        d = {"components": {"a": {"theme": "결제"}, "b": {"theme": "결제"}, "c": {"theme": "인증"}},
+             "flows": {}, "normal": []}
+        p = K.context("c1", "결제 쪽이 이상해", data=d, incidents=[])
+        self.assertEqual(p["asked"], ["a", "b"])
+        self.assertEqual(K.context("c1", "", names=["인증"], data=d, incidents=[])["asked"], ["c"])
+        d["components"]["결제"] = {}
+        self.assertTrue(any("테마 '결제'" in m for _, m in K.check("c1", d)))
+
     def test_explicit_name_by_alias(self):
         self.assertEqual(ctx("", names=["결제사"])["asked"], ["pay"])
 

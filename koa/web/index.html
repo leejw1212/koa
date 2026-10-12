@@ -142,6 +142,8 @@ details[open] > summary::before { transform: rotate(90deg); }
 @media (max-width: 900px) { .split2 { grid-template-columns: 1fr; } }
 .khdr { margin-bottom: 4px; }
 .klist { display: flex; flex-direction: column; gap: 6px; }
+.kgroup { display: flex; align-items: center; gap: 8px; padding: 6px 4px 2px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; user-select: none; }
+.kgroup:hover { color: var(--ink); }
 .krow { border-radius: 14px; border: 1px solid var(--edge-soft); background: var(--glass-soft); transition: background .15s, border-color .15s; }
 .krow:hover { background: var(--glass-strong); }
 .krow.open { background: var(--glass-strong); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -236,7 +238,7 @@ details[open] > summary::before { transform: rotate(90deg); }
           <button class="btn ghost" id="kPickClose">닫기</button>
         </div>
       </div>
-      <p class="hint">질문 속 이름(별명)과 k8s 워크로드를 잇습니다. 줄을 누르면 고칩니다.</p>
+      <p class="hint">질문 속 이름(별명)과 k8s 워크로드를 잇습니다. 줄을 누르면 고칩니다. 테마를 적으면 테마별로 묶이고, 질문에 테마 이름을 쓰면 그 구성요소를 모두 봅니다.</p>
       <div id="kComps" class="klist"></div>
     </section>
     <section class="card glass">
@@ -282,6 +284,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 </main>
 <div id="toast" class="glass"></div>
 <datalist id="compNames"></datalist>
+<datalist id="themeNames"></datalist>
 <datalist id="workloadNames"></datalist>
 
 <script>
@@ -536,15 +539,30 @@ function compSum(n, c) {
   const tail = (c.aliases || []).slice(0, 3).map(a => `<span class="chip">${esc(a)}</span>`).join("") + ((c.aliases || []).length > 3 ? `<span class="chip">+${c.aliases.length - 3}</span>` : "");
   return `<span class="nm">${esc(n)}</span>${c.kind && KIND_LABEL[c.kind] ? `<span class="chip accent">${KIND_LABEL[c.kind]}</span>` : ""}${where}<span class="tail">${tail}</span>`;
 }
+// 구성요소 목록: 테마가 하나라도 있으면 테마별로 묶어 보여 준다 (머리를 누르면 접힘)
+const closedThemes = new Set();
 function renderComps() {
-  $("#kComps").innerHTML = Object.entries(SH.components).map(([n, c]) => rowHTML("c:" + n, compSum(n, c), `
+  const ents = Object.entries(SH.components), groups = {};
+  ents.forEach(e => { const t = (e[1].theme || "").trim(); (groups[t] = groups[t] || []).push(e); });
+  const keys = Object.keys(groups).filter(Boolean).sort((a, b) => a.localeCompare(b, "ko"));
+  $("#themeNames").innerHTML = keys.map(t => `<option value="${esc(t)}">`).join("");
+  const order = keys.concat(groups[""] && keys.length ? [""] : []);
+  $("#kComps").innerHTML = (!keys.length ? ents.map(compRow).join("") : order.map(t => {
+    const shut = closedThemes.has(t);
+    return `<div class="kgroup" data-theme="${esc(t)}"><span class="grow">${t ? esc(t) : "테마 없음"}</span><span class="chip">${groups[t].length}</span><span>${shut ? "▸" : "▾"}</span></div>`
+      + (shut ? "" : groups[t].map(compRow).join(""));
+  }).join(""))
+    || '<div class="kempty">아직 없습니다. "클러스터에서 고르기" 로 시작하세요.</div>';
+}
+function compRow([n, c]) {
+  return rowHTML("c:" + n, compSum(n, c), `
       <div><label class="f">이름</label><input data-k="c" data-n="${esc(n)}" data-f="name" value="${esc(n)}"></div>
       <div><label class="f">종류</label><select data-k="c" data-n="${esc(n)}" data-f="kind">${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="full"><label class="f">워크로드 (네임스페이스/종류/이름, 여러 개를 묶으면 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="workload" list="workloadNames" value="${esc(wls(c).join(", "))}" placeholder="shop/Deployment/order-api"></div>
-      <div class="full"><label class="f">별명 (질문에서 부르는 말, 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
+      <div><label class="f">별명 (질문에서 부르는 말, 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
+      <div><label class="f">테마 (결제·인증 같은 묶음, 하나)</label><input data-k="c" data-n="${esc(n)}" data-f="theme" list="themeNames" value="${esc(c.theme || "")}" placeholder="결제"></div>
       <div class="full"><label class="f">문제일 때 찍히는 로그 문구</label><input data-k="c" data-n="${esc(n)}" data-f="log" value="${esc((c.log_signatures || []).join(", "))}" placeholder="Too many connections"></div>
-      <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`)).join("")
-    || '<div class="kempty">아직 없습니다. "클러스터에서 고르기" 로 시작하세요.</div>';
+      <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`);
 }
 function renderNormal() {
   $("#kNormal").innerHTML = SH.normal.map((x, i) => rowHTML("n" + i,
@@ -565,6 +583,8 @@ function refreshSum(row) {
 }
 // 줄 열고 닫기 · 삭제
 $("#tab-knowledge").addEventListener("click", e => {
+  const grp = e.target.closest(".kgroup");
+  if (grp) { const t = grp.dataset.theme; closedThemes.has(t) ? closedThemes.delete(t) : closedThemes.add(t); renderComps(); return; }
   const unk = e.target.closest("[data-unk]");
   if (unk) { e.stopPropagation(); showLink(unk.dataset.unk); return; }
   const del = e.target.closest("[data-del]");
@@ -609,7 +629,9 @@ $("#tab-knowledge").addEventListener("input", e => {
 });
 // 이름 바꾸기는 칸을 벗어날 때
 $("#tab-knowledge").addEventListener("change", e => {
-  const t = e.target; if (t.dataset.k !== "c" || t.dataset.f !== "name") return;
+  const t = e.target;
+  if (t.dataset.k === "c" && t.dataset.f === "theme") { closedThemes.delete((t.value || "").trim()); renderComps(); return; }
+  if (t.dataset.k !== "c" || t.dataset.f !== "name") return;
   const old = t.dataset.n, nn = t.value.trim();
   if (!nn || nn === old) { t.value = old; return; }
   if (SH.components[nn]) { toast("같은 이름이 있습니다"); t.value = old; return; }

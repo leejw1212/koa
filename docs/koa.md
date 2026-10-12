@@ -59,6 +59,9 @@ components:                    # 사람이 부르는 이름 → k8s 워크로드
   orders-db:
     external: true             # 클러스터 밖. 로그 문구로만 판정
     aliases: [주문 DB]
+  pay-api:
+    workload: pay/Deployment/api
+    theme: 결제                # 테마: 화면에서 묶어 보이고, 질문에 '결제' 가 나오면 이 테마의 구성요소 전부
   gateway:                     # 흐름 칸은 구성요소 이름 그대로. 여러 워크로드를 한 칸으로 묶을 때는 목록
     workload: [edge/Deployment/public-gw, edge/Deployment/admin-gw]
 
