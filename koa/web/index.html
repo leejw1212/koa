@@ -565,14 +565,14 @@ function renderNormal() {
   SH.normal.forEach(x => { const k = normalKey(x); cnt[k] = (cnt[k] || 0) + 1; });
   const keys = Object.keys(cnt).filter(Boolean).sort((a, b) => a.localeCompare(b, "ko")).concat(cnt[""] ? [""] : []);
   if (nTab && !cnt[nTab]) nTab = "";
-  $("#nTabs").innerHTML = keys.length > 1 ? [["", "전체", SH.normal.length]].concat(keys.map(k => [k, k || "대상 없음", cnt[k]]))
+  $("#nTabs").innerHTML = keys.length ? [["", "전체", SH.normal.length]].concat(keys.map(k => [k, k || "대상 없음", cnt[k]]))
     .map(([k, l, n]) => `<button data-ntab="${esc(k)}" class="${k === nTab ? "on" : ""}">${esc(l)}<small>${n}</small></button>`).join("") : "";
-  $("#nBar").hidden = SH.normal.length < 2;
+  $("#nBar").hidden = !SH.normal.length;
   const q = nFind.toLowerCase(), byKey = nTab === "" ? null : nTab;
   const idx = SH.normal.map((x, i) => i).filter(i => {
     const x = SH.normal[i];
     if (SH.open === "n" + i) return true;
-    if (byKey !== null && keys.length > 1 && normalKey(x) !== byKey) return false;
+    if (byKey !== null && normalKey(x) !== byKey) return false;
     return !q || ((x.component || "") + " " + (x.note || "")).toLowerCase().includes(q);
   }).sort((a, b) => (SH.normal[a].component || "\uffff").localeCompare(SH.normal[b].component || "\uffff", "ko") || a - b);
   $("#kNormal").innerHTML = idx.map(i => [SH.normal[i], i]).map(([x, i]) => rowHTML("n" + i,

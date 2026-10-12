@@ -1,5 +1,5 @@
 name: koa
-version: 0.2.15
+version: 0.2.16
 description: "KOA — Kubernetes 장애 분석 에이전트. 클러스터를 읽기 전용으로 탐색해 MCP 를 붙이고, 사용자가 말한 구성요소·흐름만 클러스터 지식으로 분석하며, 분석에서 알게 된 것을 사용자 OK 후 지식에 쌓는다."
 hermes_requires: ">=0.21.0"
 author: "leejw1212"
