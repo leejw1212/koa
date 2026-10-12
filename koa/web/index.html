@@ -50,6 +50,8 @@ body::before { content: ""; position: fixed; inset: -20vmax; z-index: -1; pointe
 .seg { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--glass-soft); border: 1px solid var(--edge-soft); overflow-x: auto; }
 .seg button { border: 0; background: none; color: var(--muted); font: 600 13.5px var(--sans); padding: 7px 16px; border-radius: 999px; cursor: pointer; transition: .18s; white-space: nowrap; }
 .seg button:hover { color: var(--ink); }
+.seg.sm button { font-size: 12.5px; padding: 5px 12px; }
+.seg button small { margin-left: 5px; color: var(--faint); font-weight: 600; }
 .seg button.on { color: var(--ink); background: var(--glass-strong); box-shadow: 0 2px 10px rgba(40, 52, 120, .12), inset 0 1px 0 var(--hl); }
 .spacer { flex: 1; }
 .pick { display: flex; align-items: center; gap: 6px; }
@@ -266,6 +268,8 @@ details[open] > summary::before { transform: rotate(90deg); }
       <span class="faint" id="nSaveState"></span>
       <button class="btn" data-n="addNormal">＋ 정상 패턴</button><button class="btn primary" id="nSave">저장</button></div>
     <p class="hint">이 클러스터에서 정상인데 이상해 보이는 것입니다. 분석은 해당 구성요소를 볼 때만 이걸 참고해서 "원인이 아니다" 를 거릅니다. 분석이 끝나면 KOA 가 새로 본 패턴을 더할지 묻고, OK 하면 여기에 쌓입니다. 클러스터 지식(flows.yaml)에 저장됩니다.</p>
+    <div class="row" id="nBar" style="gap:10px;margin-bottom:10px"><div class="seg sm grow" id="nTabs"></div>
+      <input id="nFind" placeholder="찾기" style="max-width:200px"></div>
     <div id="kNormal" class="klist"></div>
   </section>
   <section class="card glass">
@@ -553,12 +557,29 @@ function compRow([n, c]) {
       <div class="full"><label class="f">문제일 때 찍히는 로그 문구</label><input data-k="c" data-n="${esc(n)}" data-f="log" value="${esc((c.log_signatures || []).join(", "))}" placeholder="Too many connections"></div>
       <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`);
 }
+// 정상 패턴: 구성요소의 그룹(없으면 구성요소 이름)별 탭 + 찾기. 새로 연 줄은 탭과 관계없이 보인다
+let nTab = "", nFind = "";
+const normalKey = x => (x.component && SH.components[x.component] && (SH.components[x.component].group || "").trim()) || (x.component || "").trim();
 function renderNormal() {
-  $("#kNormal").innerHTML = SH.normal.map((x, i) => rowHTML("n" + i,
+  const cnt = {};
+  SH.normal.forEach(x => { const k = normalKey(x); cnt[k] = (cnt[k] || 0) + 1; });
+  const keys = Object.keys(cnt).filter(Boolean).sort((a, b) => a.localeCompare(b, "ko")).concat(cnt[""] ? [""] : []);
+  if (nTab && !cnt[nTab]) nTab = "";
+  $("#nTabs").innerHTML = keys.length > 1 ? [["", "전체", SH.normal.length]].concat(keys.map(k => [k, k || "대상 없음", cnt[k]]))
+    .map(([k, l, n]) => `<button data-ntab="${esc(k)}" class="${k === nTab ? "on" : ""}">${esc(l)}<small>${n}</small></button>`).join("") : "";
+  $("#nBar").hidden = SH.normal.length < 2;
+  const q = nFind.toLowerCase(), byKey = nTab === "" ? null : nTab;
+  const idx = SH.normal.map((x, i) => i).filter(i => {
+    const x = SH.normal[i];
+    if (SH.open === "n" + i) return true;
+    if (byKey !== null && keys.length > 1 && normalKey(x) !== byKey) return false;
+    return !q || ((x.component || "") + " " + (x.note || "")).toLowerCase().includes(q);
+  }).sort((a, b) => (SH.normal[a].component || "\uffff").localeCompare(SH.normal[b].component || "\uffff", "ko") || a - b);
+  $("#kNormal").innerHTML = idx.map(i => [SH.normal[i], i]).map(([x, i]) => rowHTML("n" + i,
       `<div class="grow" style="font-size:13px"><b>${esc(x.component || "대상?")}</b> <span class="muted">${esc(x.note || "")}</span></div>`, `
       <div><label class="f">구성요소</label><input data-k="n" data-i="${i}" data-f="component" list="compNames" value="${esc(x.component || "")}"></div>
       <div><label class="f">정상 동작</label><input data-k="n" data-i="${i}" data-f="note" value="${esc(x.note || "")}" placeholder="매일 02:00 배치 때 큐가 쌓였다 빠진다"></div>`)).join("")
-    || '<div class="kempty">없음</div>';
+    || `<div class="kempty">${SH.normal.length ? "맞는 정상 패턴이 없습니다" : "없음"}</div>`;
   $("#compNames").innerHTML = Object.keys(SH.components).map(n => `<option value="${esc(n)}">`).join("");
 }
 function markDirty() { S.dirty = true; $("#saveState").innerHTML = $("#nSaveState").innerHTML = '<span class="dot"></span>저장 안 됨'; }
@@ -595,7 +616,7 @@ const onKnowledgeClick = e => {
     const a = add.dataset.n;
     if (a === "addFlow") { SH.flows.push({ name: "flow-" + (SH.flows.length + 1), kind: "http", nodes: [] }); SH.open = "f" + (SH.flows.length - 1); }
     else if (a === "addComp") { let b = "새-구성요소", i = 1; while (SH.components[b]) b = "새-구성요소-" + (++i); SH.components[b] = {}; SH.open = "c:" + b; }
-    else if (a === "addNormal") { SH.normal.push({ component: "", note: "" }); SH.open = "n" + (SH.normal.length - 1); }
+    else if (a === "addNormal") { SH.normal.push({ component: SH.components[nTab] ? nTab : "", note: "" }); SH.open = "n" + (SH.normal.length - 1); }
     markDirty(); renderAll();
     const first = $(`.krow[data-id="${CSS.escape(SH.open)}"] .kedit input`); if (first) first.focus();
   }
@@ -622,6 +643,9 @@ const onKnowledgeInput = e => {
 // 이름 바꾸기는 칸을 벗어날 때
 $("#tab-knowledge").addEventListener("input", onKnowledgeInput);
 $("#kNormalCard").addEventListener("input", onKnowledgeInput);
+$("#nTabs").addEventListener("click", e => { const b = e.target.closest("[data-ntab]"); if (!b) return; e.stopPropagation(); nTab = b.dataset.ntab; SH.open = null; renderNormal(); });
+$("#nFind").addEventListener("input", e => { e.stopPropagation(); nFind = e.target.value.trim(); renderNormal(); });
+$("#kNormalCard").addEventListener("change", e => { if (e.target.dataset.k === "n" && e.target.dataset.f === "component") renderNormal(); });
 $("#tab-knowledge").addEventListener("change", e => {
   const t = e.target;
   if (t.dataset.k === "c" && t.dataset.f === "group") { closedGroups.delete((t.value || "").trim()); renderAll(); return; }
