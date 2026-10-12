@@ -140,8 +140,6 @@ details[open] > summary::before { transform: rotate(90deg); }
 .empty { text-align: center; padding: 36px 10px; color: var(--muted); }
 [hidden] { display: none !important; }
 /* 클러스터 지식 */
-.split2 { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; align-items: start; }
-@media (max-width: 900px) { .split2 { grid-template-columns: 1fr; } }
 .khdr { margin-bottom: 4px; }
 .klist { display: flex; flex-direction: column; gap: 6px; }
 .kgroup { display: flex; align-items: center; gap: 8px; padding: 6px 4px 2px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; user-select: none; }
@@ -227,8 +225,7 @@ details[open] > summary::before { transform: rotate(90deg); }
     <div id="kFlows" class="klist"></div>
   </section>
 
-  <div class="split2">
-    <section class="card glass">
+  <section class="card glass">
       <div class="row khdr"><h2 class="grow">구성요소</h2>
         <button class="btn" id="kPickBtn">클러스터에서 고르기 <span class="faint" id="discCount"></span></button>
         <button class="btn" data-n="addComp">＋ 직접</button></div>
@@ -242,14 +239,8 @@ details[open] > summary::before { transform: rotate(90deg); }
       </div>
       <p class="hint">질문 속 이름(별명)과 k8s 워크로드를 잇습니다. 줄을 누르면 고칩니다. 그룹을 적으면 그룹별로 묶이고, 흐름 칸이나 질문에 그룹 이름을 쓰면 그 구성요소를 모두 가리킵니다.</p>
       <div id="kComps" class="klist"></div>
-    </section>
-    <section class="card glass">
-      <div class="row khdr"><h2 class="grow">정상 패턴</h2><button class="btn" data-n="addNormal">＋</button></div>
-      <p class="hint">정상인데 이상해 보이는 것. 분석 때 오탐을 거릅니다.</p>
-      <div id="kNormal" class="klist"></div>
       <p class="faint" style="margin-top:14px" id="kpath"></p>
-    </section>
-  </div>
+  </section>
 </div>
 
 <div id="tab-incidents" hidden>
@@ -270,6 +261,13 @@ details[open] > summary::before { transform: rotate(90deg); }
 </div>
 
 <div id="tab-learned" hidden>
+  <section class="card glass" id="kNormalCard">
+    <div class="row khdr"><h2 class="grow">정상 패턴 <span class="faint" id="nCluster"></span></h2>
+      <span class="faint" id="nSaveState"></span>
+      <button class="btn" data-n="addNormal">＋ 정상 패턴</button><button class="btn primary" id="nSave">저장</button></div>
+    <p class="hint">이 클러스터에서 정상인데 이상해 보이는 것입니다. 분석은 해당 구성요소를 볼 때만 이걸 참고해서 "원인이 아니다" 를 거릅니다. 분석이 끝나면 KOA 가 새로 본 패턴을 더할지 묻고, OK 하면 여기에 쌓입니다. 클러스터 지식(flows.yaml)에 저장됩니다.</p>
+    <div id="kNormal" class="klist"></div>
+  </section>
   <section class="card glass">
     <h2>메모리</h2>
     <p class="hint">KOA 가 모든 대화에 가지고 다니는 짧은 사실입니다 (클러스터와 상관없는 사용자·환경 정보). 틀린 항목은 지우세요. 다음 새 채팅부터 반영됩니다.</p>
@@ -313,7 +311,6 @@ function showTab(t) {
   S.tab = t; store.set("tab", t);
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   ["knowledge", "incidents", "learned"].forEach(x => $("#tab-" + x).hidden = x !== t);
-  $("#newCluster").parentElement.style.visibility = t === "learned" ? "hidden" : "";
   if (t === "learned") { $("#register").hidden = true; loadLearned(); return; }
   const need = !S.k || S.register;
   $("#register").hidden = !need;
@@ -366,7 +363,9 @@ function flowsToNodes(flows) {
   return Object.entries(flows || {}).map(([name, f]) => ({ name, kind: f.kind || ((f.nodes || []).some(n => QRE.test(n)) ? "queue" : "http"), nodes: f.nodes || [] }));
 }
 function renderKnowledge() {
-  const k = S.k; if (!k) return;
+  const k = S.k;
+  $("#nCluster").textContent = k ? "· " + (k.cluster || S.cluster) : "";
+  if (!k) { $("#kNormal").innerHTML = '<div class="kempty">클러스터를 고르면 그 클러스터의 정상 패턴이 보입니다.</div>'; return; }
   $("#kTitle").textContent = (k.cluster || S.cluster) + " 지식";
   $("#kpath").textContent = "저장 위치: " + k.path;
   SH = {
@@ -374,7 +373,7 @@ function renderKnowledge() {
     flows: flowsToNodes(k.understood.flows || {}),
     normal: (k.understood.normal || []).map(x => ({ ...x })),
   };
-  SH.open = null; S.dirty = false; $("#saveState").textContent = "";
+  SH.open = null; S.dirty = false; $("#saveState").textContent = $("#nSaveState").textContent = "";
   renderChecks(k.check || []);
   renderAll();
   renderSug();
@@ -478,8 +477,9 @@ function renderChecks(list) {
 }
 function renderStats() {
   const nc = Object.keys(SH.components).length, chk = (S.checks || []).length;
-  $("#kStats").innerHTML = `<span class="chip">구성요소 ${nc}</span><span class="chip">흐름 ${SH.flows.length}</span><span class="chip">정상 패턴 ${SH.normal.length}</span>`
+  $("#kStats").innerHTML = `<span class="chip">구성요소 ${nc}</span><span class="chip">흐름 ${SH.flows.length}</span><span class="chip click" id="kNormChip" title="'KOA 가 배운 것' 에서 봅니다">정상 패턴 ${SH.normal.length} ↗</span>`
     + (chk ? `<span class="chip warn click" id="kChkChip" title="눌러서 보기">확인할 것 ${chk} ▾</span>` : '<span class="chip ok">문제 없음</span>');
+  $("#kNormChip").onclick = () => showTab("learned");
   const cc = $("#kChkChip"); if (cc) cc.onclick = () => { $("#kChecks").hidden = !$("#kChecks").hidden; };
 }
 function renderAll() { renderFlows(); renderComps(); renderNormal(); renderStats(); }
@@ -578,7 +578,7 @@ function renderNormal() {
     || '<div class="kempty">없음</div>';
   $("#compNames").innerHTML = Object.keys(SH.components).map(n => `<option value="${esc(n)}">`).join("");
 }
-function markDirty() { S.dirty = true; $("#saveState").innerHTML = '<span class="dot"></span>저장 안 됨'; }
+function markDirty() { S.dirty = true; $("#saveState").innerHTML = $("#nSaveState").innerHTML = '<span class="dot"></span>저장 안 됨'; }
 function refreshSum(row) {
   const id = row.dataset.id, sum = $(".ksum", row), x = sum.querySelector(".x");
   let html = "";
@@ -588,7 +588,8 @@ function refreshSum(row) {
   sum.innerHTML = html; sum.appendChild(x);
 }
 // 줄 열고 닫기 · 삭제
-$("#tab-knowledge").addEventListener("click", e => {
+// 클러스터 지식 탭과 'KOA 가 배운 것' 의 정상 패턴 카드가 같은 상태(SH)와 같은 저장을 쓴다
+const onKnowledgeClick = e => {
   const grp = e.target.closest(".kgroup");
   if (grp) { const t = grp.dataset.group; closedGroups.has(t) ? closedGroups.delete(t) : closedGroups.add(t); renderComps(); return; }
   const unk = e.target.closest("[data-unk]");
@@ -604,7 +605,7 @@ $("#tab-knowledge").addEventListener("click", e => {
   }
   const sum = e.target.closest(".ksum");
   if (sum) { const id = sum.parentElement.dataset.id; SH.open = SH.open === id ? null : id;
-    $$("#tab-knowledge .krow").forEach(r => r.classList.toggle("open", r.dataset.id === SH.open));
+    $$("#tab-knowledge .krow, #kNormalCard .krow").forEach(r => r.classList.toggle("open", r.dataset.id === SH.open));
     const first = SH.open && $(`.krow[data-id="${CSS.escape(SH.open)}"] .kedit input`); if (first) first.focus(); return; }
   const add = e.target.closest("[data-n]");
   if (add && add.tagName === "BUTTON") {
@@ -615,9 +616,11 @@ $("#tab-knowledge").addEventListener("click", e => {
     markDirty(); renderAll();
     const first = $(`.krow[data-id="${CSS.escape(SH.open)}"] .kedit input`); if (first) first.focus();
   }
-});
+};
 // 편집
-$("#tab-knowledge").addEventListener("input", e => {
+$("#tab-knowledge").addEventListener("click", onKnowledgeClick);
+$("#kNormalCard").addEventListener("click", onKnowledgeClick);
+const onKnowledgeInput = e => {
   const t = e.target, k = t.dataset.k, f = t.dataset.f; if (!k || f === "name") return;
   if (k === "c") {
     const c = SH.components[t.dataset.n]; if (!c) return;
@@ -632,8 +635,10 @@ $("#tab-knowledge").addEventListener("input", e => {
     else fl.kind = t.checked ? "queue" : "http";
   } else if (k === "n") SH.normal[+t.dataset.i][f] = t.value;
   markDirty(); refreshSum(t.closest(".krow")); renderStats();
-});
+};
 // 이름 바꾸기는 칸을 벗어날 때
+$("#tab-knowledge").addEventListener("input", onKnowledgeInput);
+$("#kNormalCard").addEventListener("input", onKnowledgeInput);
 $("#tab-knowledge").addEventListener("change", e => {
   const t = e.target;
   if (t.dataset.k === "c" && t.dataset.f === "group") { closedGroups.delete((t.value || "").trim()); renderAll(); return; }
@@ -653,11 +658,12 @@ async function saveShards() {
   try {
     const j = await api(kpath() + "/shards", payload);
     S.k = await api(kpath()); renderKnowledge();
-    $("#saveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
+    $("#saveState").textContent = $("#nSaveState").textContent = "저장됨 " + new Date().toLocaleTimeString();
     toast((S.checks || []).length ? `저장했습니다 · 확인할 것 ${S.checks.length}개` : "저장했습니다", 3000);
   } catch (e) { toast(e.message, 4000); }
 }
 $("#saveShards").onclick = saveShards;
+$("#nSave").onclick = () => S.k ? saveShards() : toast("클러스터를 먼저 고르세요");
 // 클러스터에서 고르기 (discover 후보)
 let DISC = [];
 async function loadCands() {
