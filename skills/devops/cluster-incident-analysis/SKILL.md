@@ -1,7 +1,7 @@
 ---
 name: cluster-incident-analysis
 description: "Use when analyzing a K8s problem the user names in KOA."
-version: 2.0.0
+version: 2.1.0
 author: KOA
 license: MIT
 metadata:
@@ -30,8 +30,13 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
   an app do work need the user's OK.
 - **Knowledge changes need the user's OK.** Never edit `local/knowledge/` without it; unconfirmed findings
   go to suggestions.
-- **Filter before it enters context.** `kubectl_logs` returns raw lines; always pass `since`/`tail`; prefer
-  terminal kubectl with `grep -v`, `wc -l`, `jsonpath` when you need counts or exclusions.
+- **Time window = from when the user says it started.** Read it from the question ("30분 전부터", "어젯밤 11시쯤",
+  "14:20 부터"). No time in the question → the last 1h: say so in the first reply ("최근 1시간 기준으로 봤어요.
+  더 전부터였다면 언제부터인지 알려 주세요") and keep going — don't stop to wait for the answer. Use the same window
+  for every log and event read. Widen it when the evidence says the problem began earlier (the first error line
+  sits at the window's start, restarts/`lastState` are older than the window) and say that you widened it.
+- **Filter before it enters context.** `kubectl_logs` returns raw lines; always pass the window (`since`) and
+  `tail`; prefer terminal kubectl with `grep -v`, `wc -l`, `jsonpath` when you need counts or exclusions.
 - **Say what you could not verify.** Missing signal (no metrics, short event TTL, no heartbeat) → state the
   conclusion as an inference and name the missing signal.
 - Reply in Korean, plain claims, tables for evidence; end with the knowledge proposal / next decision.
@@ -42,22 +47,27 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    current context minus `-readonly`, or ask.
 2. **Pull the slice**: `python3 koa/knowledge.py context <cluster> "<사용자 질문 그대로>"`
    (`--with a,b` when the user named things explicitly or corrected you). Show its first lines (asked
-   components, flows) at the top of your first reply so the user can correct the reading.
+   components, flows) and the time window you will use at the top of your first reply so the user can correct
+   the reading.
    - Nothing matched → ask which component/flow they mean (offer the knowledge's component names). Their
      answer is a new alias: include it in the proposal at the end.
    - A name the knowledge doesn't have → find just that workload read-only (`kubectl get deploy,sts,ds -A
      | grep <name>`), analyze it, and propose adding it.
 3. **Past incidents first**: for each `과거 이슈` in the slice, grep its log lines in the named components
-   (`kubectl logs --since=1h ... | grep -c "<line>"`). A hit is the strongest lead.
+   over the window (`kubectl logs --since-time=<window start, RFC3339> ... | grep -c "<line>"`; the MCP
+   `kubectl_logs` takes `since` as a duration, so pass one that reaches back to the window start). A hit is the
+   strongest lead.
 4. **Walk the flow hop by hop** over the components in the slice, in flow order (for a queue backlog start
    at the consumer, then broker, then the consumer's downstream, then the producer). Per hop: pods
-   (ready/restarts/lastState), recent events for those pods, logs (`since`, `tail`, the component's
+   (ready/restarts/lastState), events for those pods in the window, logs (the window, `tail`, the component's
    `로그` lines), and the call to the next hop. Judge each against its `정상 패턴` before calling it
-   abnormal — a matching normal pattern means "not the cause", say so.
+   abnormal — a matching normal pattern means "not the cause", say so. A pattern on a group (`정상 패턴 wrapper
+   (그룹: …)`) holds for each member.
    The cause point is where the flow turns from normal to abnormal.
 5. **Hypotheses**: 2–3 with evidence for/against; share the early read, then confirm.
-6. **Report**: conclusion + confidence, evidence table (hop · what was checked · tool · result), what could
-   not be verified, where the knowledge didn't match the cluster (missing workload, wrong hop).
+6. **Report**: conclusion + confidence, the time window you looked at, evidence table (hop · what was checked ·
+   tool · result), what could not be verified, where the knowledge didn't match the cluster (missing workload,
+   wrong hop).
 7. **Knowledge proposal** — always end with it, even if empty ("새로 알게 된 것 없음"):
 
    | 종류 | 내용 | 근거 |
@@ -74,6 +84,8 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    **Same cause as a past incident in the slice → don't propose a new incident.** Propose "재발" instead and,
    after OK, append it to that file: `python3 koa/knowledge.py recur <c> <incident-file> '{"date": "…", "note":
    "한 줄", "logs": ["새로 본 문구"]}'`. A new incident is only for a cause not already recorded.
+   A normal pattern or incident that holds for a whole group (every wrapper console) names the group, like a flow
+   node: `{"component": "wrapper", …}`, `"components": ["wrapper"]`.
    `add` only adds (merges list fields, fills empty fields, skips flows already known); show its output.
    **Never edit `flows.yaml` by hand.** A flow is one straight chain; a side call (web also writes to redis) is its
    own flow, e.g. `{"name": "카드-접수-저장", "nodes": ["linkcard-web", "redis"]}`. If `add` skips it as "already
@@ -92,9 +104,10 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    including one-shot `chat -q`. Skip only if the lesson is already in `koa-learned`. a cluster-independent analysis lesson →
    one line under "## Lessons" of the `koa-learned` skill (skill_manage patch; `python3 koa/learned.py init` if
    it is missing). Don't patch this skill for that: it is shipped and a profile update overwrites it. A stable
-   user/environment fact → memory, as one short Korean sentence (the user reads it in the web UI; keep tool and
-   cluster identifiers as they are). Never put cluster names/flows there. Both show in the web UI tab
-   "KOA 가 배운 것". Lessons that proved general can later be promoted into this skill in the repo.
+   user/environment fact → memory, as one short Korean sentence (keep tool and cluster identifiers as they are).
+   Never put cluster names/flows there. The web UI tab "KOA 가 배운 것" shows `koa-learned` (and the cluster's
+   normal patterns); it does not show memory — that stays with Hermes' own memory tools.
+   Lessons that proved general can later be promoted into this skill in the repo.
    **Never create a new skill without asking.** If something deserves its own skill instead of a lesson line,
    describe it in two or three lines (name, when it loads, what it says) and create it only after the user's OK.
 
@@ -119,4 +132,6 @@ or say which to add (`knowledge.py suggestions <c>`, then `accept <c> <id>` per 
   (`kubectl get netpol -n <ns> -o yaml`, look at creation/edit time).
 - With the MCP, ConfigMap edits show only as creation (no managedFields); terminal kubectl
   `--show-managed-fields` shows edit times.
-- Remaining k8s events are not a retention measure — read kube-apiserver `--event-ttl` (default 1h).
+- Remaining k8s events are not a retention measure — read kube-apiserver `--event-ttl` (default 1h). A window
+  that starts before the TTL has no events left for its early part: use restarts/`lastState`,
+  `kubectl logs --previous`, and the log index (if connected) instead, and say the events were gone.
