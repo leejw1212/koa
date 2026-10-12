@@ -109,7 +109,9 @@ textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; bord
 .node { padding: 4px 12px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--glass-strong); border: 1px solid var(--edge-soft); }
 .node.ext { border-style: dashed; border-color: var(--faint); background: transparent; }
 .node.q { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-.node.unk { border-color: var(--warn); }
+.node.unk { border-color: var(--warn); cursor: pointer; }
+.klink select { width: auto; flex: 0 1 240px; }
+.klink { margin-top: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--warn); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .arrow { color: var(--faint); font-size: 13px; padding: 0 4px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; }
 .arrow small { font-size: 10.5px; color: var(--accent); font-weight: 700; }
 .comp { padding: 10px 12px; border-radius: 14px; background: var(--glass-soft); border: 1px solid var(--edge-soft); min-width: 0; position: relative; }
@@ -216,7 +218,8 @@ details[open] > summary::before { transform: rotate(90deg); }
 
   <section class="card glass">
     <div class="row khdr"><h2 class="grow">흐름</h2><button class="btn" data-n="addFlow">＋ 흐름</button></div>
-    <p class="hint">요청이 지나는 길입니다. 분석은 이 길을 따라 정상에서 비정상으로 바뀌는 첫 지점을 찾습니다. 줄을 누르면 고칩니다. <span class="node unk" style="font-size:11px;padding:0 8px">주황 테두리</span> 는 구성요소에 없는 이름, <span class="node ext" style="font-size:11px;padding:0 8px">점선</span> 은 클러스터 밖.</p>
+    <p class="hint">요청이 지나는 길입니다. 분석은 이 길을 따라 정상에서 비정상으로 바뀌는 첫 지점을 찾습니다. 줄을 누르면 고칩니다. 흐름의 각 칸은 구성요소 이름 그대로 씁니다. <span class="node unk" style="font-size:11px;padding:0 8px">주황 테두리</span> 는 구성요소 이름이 아닌 칸이고 눌러서 연결합니다. <span class="node ext" style="font-size:11px;padding:0 8px">점선</span> 은 클러스터 밖.</p>
+    <div id="kLink" class="klink" hidden></div>
     <div id="kFlows" class="klist"></div>
   </section>
 
@@ -370,6 +373,8 @@ function renderKnowledge() {
   renderChecks(k.check || []);
   renderAll();
   renderSug();
+  $("#kLink").hidden = true;
+  if ((k.migrated || []).length) toast("흐름 칸을 구성요소 이름으로 맞췄습니다 (" + k.migrated.length + "건, 이전 파일은 flows.yaml.pre-names.bak)", 6000);
   loadCands();
 }
 function renderSug() {
@@ -473,15 +478,39 @@ function renderStats() {
   const cc = $("#kChkChip"); if (cc) cc.onclick = () => { $("#kChecks").hidden = !$("#kChecks").hidden; };
 }
 function renderAll() { renderFlows(); renderComps(); renderNormal(); renderStats(); }
-function known(n) {
-  if (SH.components[n]) return SH.components[n];
-  return Object.values(SH.components).find(c => (c.flow_nodes || []).includes(n) || (c.aliases || []).includes(n)) || null;
-}
+// 흐름 칸 = 구성요소 이름 (서버 knowledge.node_to_comps 와 같은 규칙: 이름이 정확히 같을 때만)
+const known = n => SH.components[n] || null;
+const wls = c => [].concat((c && c.workload) || []);
 function nodeHTML(n) {
   const c = known(n);
   const cls = !c ? "unk" : c.kind === "message-queue" ? "q" : c.external ? "ext" : "";
-  return `<span class="node ${cls}" title="${esc(!c ? "구성요소에 없음" : c.external ? "클러스터 밖" : (c.workload || ""))}">${esc(n)}</span>`;
+  return `<span class="node ${cls}" ${c ? "" : `data-unk="${esc(n)}"`} title="${esc(!c ? "구성요소 이름이 아님 — 눌러서 연결" : c.external ? "클러스터 밖" : wls(c).join(", "))}">${esc(n)}</span>`;
 }
+// 주황 칸 연결: 기존 구성요소 이름으로 바꾸거나, 그 이름으로 구성요소를 만든다
+function similar(n) {
+  const l = n.toLowerCase(), names = Object.keys(SH.components);
+  const hit = names.filter(x => (SH.components[x].aliases || []).some(a => a.toLowerCase() === l)
+    || (x.length >= 3 && l.length >= 3 && (x.toLowerCase().includes(l) || l.includes(x.toLowerCase()))));
+  return hit.concat(names.filter(x => !hit.includes(x)).sort());
+}
+function showLink(n) {
+  const opts = similar(n);
+  $("#kLink").innerHTML = `<span class="grow"><b>${esc(n)}</b> 은 구성요소 이름이 아닙니다.</span>
+    ${opts.length ? `<select id="kLinkSel">${opts.map(x => `<option>${esc(x)}</option>`).join("")}</select><button class="btn" id="kLinkTo">이 구성요소로 바꾸기</button>` : ""}
+    <button class="btn" id="kLinkNew">새 구성요소로 추가</button><button class="x" id="kLinkClose" title="닫기">×</button>`;
+  $("#kLink").hidden = false; $("#kLink").dataset.node = n;
+}
+function linkNode(from, to) {
+  SH.flows.forEach(fl => fl.nodes = fl.nodes.map(x => x === from ? to : x));
+  SH.normal.forEach(x => { if (x.component === from) x.component = to; });
+  $("#kLink").hidden = true; markDirty(); renderAll();
+}
+$("#kLink").addEventListener("click", e => {
+  const n = $("#kLink").dataset.node;
+  if (e.target.id === "kLinkClose") $("#kLink").hidden = true;
+  else if (e.target.id === "kLinkTo") { linkNode(n, $("#kLinkSel").value); toast(`'${n}' → ${$("#kLinkSel").value}`); }
+  else if (e.target.id === "kLinkNew") { SH.components[n] = {}; SH.open = "c:" + n; $("#kLink").hidden = true; markDirty(); renderAll(); }
+});
 function chainHTML(fl) {
   const q = fl.kind === "queue";
   return fl.nodes.map((n, i) => {
@@ -503,7 +532,7 @@ function renderFlows() {
     || '<div class="kempty">아직 없습니다. ＋ 흐름으로 "사용자 → gateway → order-api" 처럼 적어 보세요.</div>';
 }
 function compSum(n, c) {
-  const where = c.external ? '<span class="chip">클러스터 밖</span>' : c.workload ? `<span class="wl grow">${esc(c.workload)}</span>` : '<span class="chip warn">워크로드 없음</span>';
+  const where = c.external ? '<span class="chip">클러스터 밖</span>' : wls(c).length ? `<span class="wl grow">${esc(wls(c).join(", "))}</span>` : '<span class="chip warn">워크로드 없음</span>';
   const tail = (c.aliases || []).slice(0, 3).map(a => `<span class="chip">${esc(a)}</span>`).join("") + ((c.aliases || []).length > 3 ? `<span class="chip">+${c.aliases.length - 3}</span>` : "");
   return `<span class="nm">${esc(n)}</span>${c.kind && KIND_LABEL[c.kind] ? `<span class="chip accent">${KIND_LABEL[c.kind]}</span>` : ""}${where}<span class="tail">${tail}</span>`;
 }
@@ -511,9 +540,8 @@ function renderComps() {
   $("#kComps").innerHTML = Object.entries(SH.components).map(([n, c]) => rowHTML("c:" + n, compSum(n, c), `
       <div><label class="f">이름</label><input data-k="c" data-n="${esc(n)}" data-f="name" value="${esc(n)}"></div>
       <div><label class="f">종류</label><select data-k="c" data-n="${esc(n)}" data-f="kind">${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-      <div class="full"><label class="f">워크로드 (네임스페이스/종류/이름)</label><input data-k="c" data-n="${esc(n)}" data-f="workload" list="workloadNames" value="${esc(c.workload || "")}" placeholder="shop/Deployment/order-api"></div>
-      <div><label class="f">별명 (질문에서 부르는 말, 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
-      <div><label class="f">흐름에서 쓰는 이름 (쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="flow_nodes" value="${esc((c.flow_nodes || []).join(", "))}"></div>
+      <div class="full"><label class="f">워크로드 (네임스페이스/종류/이름, 여러 개를 묶으면 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="workload" list="workloadNames" value="${esc(wls(c).join(", "))}" placeholder="shop/Deployment/order-api"></div>
+      <div class="full"><label class="f">별명 (질문에서 부르는 말, 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
       <div class="full"><label class="f">문제일 때 찍히는 로그 문구</label><input data-k="c" data-n="${esc(n)}" data-f="log" value="${esc((c.log_signatures || []).join(", "))}" placeholder="Too many connections"></div>
       <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`)).join("")
     || '<div class="kempty">아직 없습니다. "클러스터에서 고르기" 로 시작하세요.</div>';
@@ -537,6 +565,8 @@ function refreshSum(row) {
 }
 // 줄 열고 닫기 · 삭제
 $("#tab-knowledge").addEventListener("click", e => {
+  const unk = e.target.closest("[data-unk]");
+  if (unk) { e.stopPropagation(); showLink(unk.dataset.unk); return; }
   const del = e.target.closest("[data-del]");
   if (del) {
     e.stopPropagation();
@@ -565,7 +595,8 @@ $("#tab-knowledge").addEventListener("input", e => {
   const t = e.target, k = t.dataset.k, f = t.dataset.f; if (!k || f === "name") return;
   if (k === "c") {
     const c = SH.components[t.dataset.n]; if (!c) return;
-    if (f === "aliases" || f === "flow_nodes") c[f] = csvs(t.value);
+    if (f === "aliases") c.aliases = csvs(t.value);
+    else if (f === "workload") { const w = csvs(t.value); c.workload = w.length > 1 ? w : w[0] || undefined; }
     else if (f === "log") c.log_signatures = csvs(t.value);
     else if (f === "external") c.external = t.checked || undefined;
     else c[f] = t.value || undefined;

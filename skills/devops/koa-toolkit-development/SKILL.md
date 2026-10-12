@@ -152,13 +152,17 @@ On a machine without the LaunchAgent: copy that plist (paths adjusted) and `laun
 
 ## Knowledge rules (`knowledge.py context` / `add`) — pitfalls
 
-- Name → component matching is substring-based (aliases, `flow_nodes`). A node that equals a component
-  name must resolve to that component only, or `x-worker` leaks into the component whose alias is `x` and
-  drags unrelated flows into the context. Keep the exact-name short-circuit in `node_to_comps`.
+- A flow node is a component name, matched exactly (`node_to_comps`; the web `known()` uses the same rule).
+  No alias or substring matching for flow nodes: two rules (fuzzy server, exact UI) made the screen and the
+  analysis disagree. Aliases are only for finding components in the user's question (`mentions`,
+  `name_to_comps`). One node for several workloads = one component whose `workload` is a list.
+- `flow_nodes` is gone. `load_flows` runs `migrate` once on old files (rewrites nodes, groups shared names,
+  moves the rest to aliases) and saves with `flows.yaml.pre-names.bak` — the one place a tool rewrites
+  knowledge without a suggestion, approved by the user (2026-10-12) as a format change, not new content.
 - `context` returns the named components + every flow through them + the components on those flows +
   incidents touching them + their normal patterns. It must not grow beyond that (no "related" guesses).
-- `apply_additions` must not invent fields: adding a flow does not add its node names to `flow_nodes`
-  (that silently changed which flows later questions matched). Test with a temp `cluster_dir`.
+- `apply_additions` must not invent fields: adding a flow does not add its node names to aliases
+  (that silently changes which flows later questions match). Test with a temp `cluster_dir`.
 - Suggestions are deduplicated by content key and remember dismissals (`suggestions.yaml: dismissed`);
   a flowmap re-run must leave 0 new suggestions when nothing changed (idempotency check).
 - Components added from flowmap arrive without `aliases`, so everyday names ("그라파나 접속이 안 돼") match
