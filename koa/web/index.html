@@ -408,13 +408,14 @@ async function loadLearned() {
       <span class="chip">변경 ${k.change_count}</span><span class="chip">사용 ${k.use_count}</span>
       <span class="faint">${esc(fmtTs(k.modified))}</span></div>
     <div class="kbody" hidden data-lb="${i}">
-      ${k.changes.length ? '<div class="faint" style="margin:8px 0">' + k.changes.slice().reverse().map(c => esc(fmtTs(c.ts) + " " + c.action + " (" + c.actor + ")")).join("<br>") + "</div>" : ""}
       <div class="row" style="margin:6px 0 8px;gap:8px">
         <span class="label" style="margin:0">한국어 요약</span>
         ${k.ko ? `<span class="faint">${esc(fmtTs(k.ko.created))} 기준${k.ko.stale ? ' · <b style="color:var(--warn)">스킬이 바뀌어 오래됨</b>' : ""}</span>` : '<span class="faint">아직 없음</span>'}
         <span class="grow"></span>
         <button class="btn" data-sum="${esc(k.name)}">${k.ko ? "다시 요약" : "요약 만들기"}</button>
-        <button class="btn ghost" data-raw="${i}">원문 보기</button></div>
+        <button class="btn ghost" data-raw="${i}">원문 보기</button>
+        ${k.changes.length ? `<button class="btn ghost" data-hist="${i}">수정내역 ${k.changes.length}</button>` : ""}</div>
+      <div data-histbox="${i}" hidden class="faint" style="margin:8px 0;line-height:1.7">${k.changes.slice().reverse().map(c => esc(fmtTs(c.ts) + " " + c.action + " (" + c.actor + ")")).join("<br>")}</div>
       ${k.ko ? `<div class="kosum">${mdLite(k.ko.text)}</div>` : ""}
       <pre data-rawbox="${i}" hidden style="margin-top:8px;padding:10px 12px;max-height:480px;overflow:auto">${esc(k.body)}</pre></div></div>`).join("")
     : '<div class="kempty">아직 없습니다. KOA 가 분석하며 배운 요령이 koa-learned 스킬에 쌓이면 여기에 보입니다.</div>';
@@ -444,6 +445,9 @@ $("#lSkills").addEventListener("click", async e => {
   }
   const rb = e.target.closest("[data-raw]");
   if (rb) { const b = $(`[data-rawbox="${rb.dataset.raw}"]`); b.hidden = !b.hidden; rb.textContent = b.hidden ? "원문 보기" : "원문 닫기"; return; }
+  const hb = e.target.closest("[data-hist]");
+  if (hb) { const b = $(`[data-histbox="${hb.dataset.hist}"]`), n = S.learned.skills[+hb.dataset.hist].changes.length;
+    b.hidden = !b.hidden; hb.textContent = b.hidden ? "수정내역 " + n : "수정내역 닫기"; return; }
   const r = e.target.closest("[data-ls]"); if (!r) return;
   const b = $(`[data-lb="${r.dataset.ls}"]`); b.hidden = !b.hidden;
   const n = S.learned.skills[+r.dataset.ls].name; b.hidden ? openSkills.delete(n) : openSkills.add(n);
