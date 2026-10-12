@@ -48,6 +48,8 @@ body::before { content: ""; position: fixed; inset: -20vmax; z-index: -1; pointe
 .logo { font-weight: 800; letter-spacing: .14em; font-size: 15px;
   background: linear-gradient(120deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .seg { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--glass-soft); border: 1px solid var(--edge-soft); overflow-x: auto; }
+.seg { scrollbar-width: none; }
+.seg::-webkit-scrollbar { display: none; }
 .seg button { border: 0; background: none; color: var(--muted); font: 600 13.5px var(--sans); padding: 7px 16px; border-radius: 999px; cursor: pointer; transition: .18s; white-space: nowrap; }
 .seg button:hover { color: var(--ink); }
 .seg.sm { flex-wrap: wrap; border-radius: 16px; overflow: visible; }
