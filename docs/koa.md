@@ -59,11 +59,12 @@ components:                    # 사람이 부르는 이름 → k8s 워크로드
   orders-db:
     external: true             # 클러스터 밖. 로그 문구로만 판정
     aliases: [주문 DB]
-  pay-api:
-    workload: pay/Deployment/api
-    theme: 결제                # 테마: 화면에서 묶어 보이고, 질문에 '결제' 가 나오면 이 테마의 구성요소 전부
-  gateway:                     # 흐름 칸은 구성요소 이름 그대로. 여러 워크로드를 한 칸으로 묶을 때는 목록
-    workload: [edge/Deployment/public-gw, edge/Deployment/admin-gw]
+  admin-console-wrapper:
+    workload: console/Deployment/admin-wrapper
+    group: wrapper             # 그룹: 흐름 칸에 'wrapper' 라고 쓰면 이 그룹의 구성요소 전부를 가리킨다
+  user-console-wrapper:
+    workload: console/Deployment/user-wrapper
+    group: wrapper
 
 flows:
   order-async:
@@ -104,7 +105,7 @@ python3 koa/knowledge.py suggestions <c> | accept <c> <id> | dismiss <c> <id>
 python3 koa/knowledge.py check <c>                              # 워크로드·흐름 매칭 검사
 ```
 
-흐름의 각 칸(hop)은 **구성요소 이름 그대로** 쓴다. 이름이 정확히 같을 때만 그 구성요소로 본다 (별명·부분 문자열로 붙이지 않는다).
+흐름의 각 칸(hop)은 **구성요소 이름이나 그룹 이름 그대로** 쓴다. 그룹 칸은 그 그룹의 구성요소 전부를 뜻한다. 이름이 정확히 같을 때만 그 구성요소로 본다 (별명·부분 문자열로 붙이지 않는다).
 별명(`aliases`)은 질문에서 부르는 말을 찾는 데만 쓴다. 예전 지식의 `flow_nodes` 는 읽을 때 한 번 옮긴다
 (흐름 칸을 구성요소 이름으로 바꾸고, 여럿이 공유하던 이름은 워크로드를 모은 구성요소로, 나머지는 별명으로). 옮기기 전 파일은 `flows.yaml.pre-names.bak`.
 

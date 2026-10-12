@@ -16,7 +16,7 @@
   python3 koa/knowledge.py accept|dismiss <클러스터> <id>          # 제안을 지식에 더하기 / 버리기
 
 <json> 모양 (전부 선택):
-  {"components": {"order-api": {"workload": "shop/Deployment/order-api", "kind": "app", "theme": "주문",
+  {"components": {"order-api": {"workload": "shop/Deployment/order-api", "kind": "app", "group": "주문",
                                 "aliases": ["주문 API"], "log_signatures": ["Too many connections"]}},
    "flows": [{"name": "주문", "nodes": ["ingress-nginx", "order-api", "orders-db"]}],
    "normal": [{"component": "order-worker", "note": "매일 02:00 배치 때 큐가 쌓였다 빠진다"}]}
@@ -43,7 +43,7 @@ ROLES = ("produce", "consume", "call")
 QUEUE_WORDS = re.compile(r"rabbit|rmq|kafka|sqs|nats|pulsar|queue|큐|^mq$|-mq$|activemq|redis-stream", re.I)
 QUOTED = re.compile(r"[\"“”'‘’`]([^\"“”'‘’`]{4,120})[\"“”'‘’`]")
 LIST_FIELDS = ("aliases", "log_signatures")
-SCALAR_FIELDS = ("workload", "kind", "tier", "external", "theme")
+SCALAR_FIELDS = ("workload", "kind", "tier", "external", "group")
 HEADER = "# KOA 클러스터 지식 — 구성요소 · 흐름 · 정상 패턴. 웹 화면이나 knowledge.py add 로 고친다.\n"
 
 
@@ -160,8 +160,13 @@ def comp_workloads(c):
 
 
 def node_to_comps(node, comps):
-    """흐름 노드가 가리키는 구성요소: 노드 = 구성요소 이름 (정확히 같을 때만). 웹 화면도 같은 규칙."""
-    return [node] if node and node in (comps or {}) else []
+    """흐름 칸이 가리키는 구성요소: 칸 = 구성요소 이름, 또는 그룹 이름 (그 그룹의 구성요소 전부). 정확히 같을 때만.
+    웹 화면도 같은 규칙."""
+    if not node:
+        return []
+    if node in (comps or {}):
+        return [node]
+    return groups(comps).get(node, [])
 
 
 def name_to_comps(name, comps):
@@ -198,9 +203,15 @@ def migrate(data):
         for x in (c or {}).get("flow_nodes") or []:
             shared.setdefault(str(x).strip(), []).append(n)
     lower = {n.lower(): n for n in comps}
+    for n, c in comps.items():                       # 0.2.10 의 theme → group
+        if isinstance(c, dict) and "theme" in c:
+            t = c.pop("theme")
+            if t and not c.get("group"):
+                c["group"] = t
+            moved.append("구성요소 %s: theme → group" % n)
 
     def target(node):
-        if node in comps:
+        if node in comps or node in groups(comps):
             return None
         if node in rename:
             return rename[node]
@@ -208,7 +219,11 @@ def migrate(data):
         if len(owners) == 1:
             t = owners[0]
         elif len(owners) > 1:
-            if node not in comps:
+            if all(not (comps[o] or {}).get("group") or comps[o]["group"] == node for o in owners):
+                for o in owners:
+                    comps[o]["group"] = node
+                moved.append("그룹 %s 로 묶었다 (%s)" % (node, ", ".join(owners)))
+            elif node not in comps:
                 ws = []
                 for o in owners:
                     ws += [w for w in comp_workloads(comps[o]) if w not in ws]
@@ -714,18 +729,18 @@ def check(cluster, data=None):
             if k in owner and owner[k] != name:
                 out.append(("warn", "'%s' 가 %s 와 %s 둘 다의 이름이다 (질문에서 못 가린다)" % (a, owner[k], name)))
             owner[k] = name
-    for t in themes(comps):
-        if t.lower() in owner:
-            out.append(("warn", "테마 '%s' 가 구성요소 %s 의 이름과 같다 (질문에서 못 가린다)" % (t, owner[t.lower()])))
+    for g in groups(comps):
+        if g.lower() in owner:
+            out.append(("warn", "그룹 '%s' 가 구성요소 %s 의 이름과 같다 (흐름·질문에서 못 가린다)" % (g, owner[g.lower()])))
     for fname, f in (data.get("flows") or {}).items():
         es = edges(f)
         if not es:
             out.append(("warn", "흐름 %s: hop 이 없다" % fname))
         for e in es:
             for n in (e["from"], e["to"]):
-                if n and n not in comps:
+                if n and not node_to_comps(n, comps):
                     hint = similar_comps(n, comps)
-                    out.append(("warn", "흐름 %s: '%s' 는 구성요소 이름이 아니다 → %s" % (
+                    out.append(("warn", "흐름 %s: '%s' 는 구성요소·그룹 이름이 아니다 → %s" % (
                         fname, n, ("%s 로 바꾸거나 " % " / ".join(hint[:3]) if hint else "") + "구성요소로 더한다")))
             if e["role"] not in ROLES:
                 out.append(("error", "흐름 %s: role '%s' 는 produce | consume | call 중 하나" % (fname, e["role"])))
@@ -745,11 +760,12 @@ def check(cluster, data=None):
 
 # ---------- 꺼내기: 질문에 해당하는 지식만 ----------
 
-def themes(comps):
-    """테마 → 그 테마의 구성요소 목록 (적힌 순서). 테마는 구성요소마다 하나 ('결제', '인증' 같은 꼬리표)."""
+def groups(comps):
+    """그룹 → 그 그룹의 구성요소 목록 (적힌 순서). 구성요소마다 그룹 하나 (예: admin/manager/user console wrapper → wrapper).
+    그룹 이름은 흐름 칸에 쓸 수 있고, 질문에 나오면 그 구성요소 전부를 본다."""
     out = {}
     for n, c in (comps or {}).items():
-        t = str((c or {}).get("theme") or "").strip()
+        t = str((c or {}).get("group") or "").strip()
         if t:
             out.setdefault(t, []).append(n)
     return out
@@ -757,17 +773,18 @@ def themes(comps):
 
 def mentions(text, comps, flows=None):
     """질문에 나온 구성요소·흐름 (나온 순서). 긴 이름부터 맞추고 맞춘 자리는 지워서 'shop-worker' 가 'shop' 으로 또 잡히지 않게.
-    테마 이름을 말하면 그 테마의 구성요소 전부 ("결제 쪽이 이상해")."""
-    low = (text or "").lower()
+    그룹 이름을 말하면 그 그룹의 구성요소 전부 ("wrapper 가 이상해")."""
+    norm = lambda x: re.sub(r"[-_\s]+", " ", str(x).lower()).strip()  # noqa: E731  'manager console wrapper' = 'manager-console-wrapper'
+    low = " %s " % norm(text or "")
     terms = []
-    for t in themes(comps):
-        terms.append((t.lower(), "t", t))
+    for g in groups(comps):
+        terms.append((norm(g), "t", g))
     for n, c in (comps or {}).items():
         for a in [n] + list((c or {}).get("aliases") or []):
             if str(a).strip():
-                terms.append((str(a).lower().strip(), "c", n))
+                terms.append((norm(a), "c", n))
     for n in (flows or {}):
-        terms.append((str(n).lower(), "f", n))
+        terms.append((norm(n), "f", n))
     terms.sort(key=lambda t: -len(t[0]))
     found = []
     for term, kind, name in terms:
@@ -778,7 +795,7 @@ def mentions(text, comps, flows=None):
         found.append((i, kind, name))
     found.sort()
     comps_hit, flows_hit = [], []
-    by_theme = themes(comps)
+    by_theme = groups(comps)
     for _, kind, name in found:
         for n in (by_theme.get(name, []) if kind == "t" else [name]):
             lst = flows_hit if kind == "f" else comps_hit
@@ -796,7 +813,7 @@ def context(cluster, question, names=None, data=None, incidents=None):
     notes = []
     if names:
         picked_c, picked_f, unknown = [], [], []
-        by_theme = themes(comps)
+        by_theme = groups(comps)
         for n in names:
             if n not in comps and n in by_theme:
                 picked_c += [x for x in by_theme[n] if x not in picked_c]
@@ -813,17 +830,22 @@ def context(cluster, question, names=None, data=None, incidents=None):
     # 흐름 노드가 말한 구성요소이거나, 그 워크로드를 품은 구성요소(예: 게이트웨이 여럿을 묶은 것)이면 그 흐름
     picked_w = {w for n in picked_c for w in comp_workloads(comps.get(n))}
     for fn, f in flows.items():
-        if fn not in hit_f and any(n in picked_c or (picked_w & set(comp_workloads(comps.get(n))))
+        if fn not in hit_f and any(set(node_to_comps(n, comps)) & set(picked_c)
+                                   or (picked_w & set(comp_workloads(comps.get(n))))
                                    for n in flow_nodes(f)):
             hit_f.append(fn)
     scope = list(picked_c)
-    flow_view = {}
+    flow_view, group_view = {}, {}
     for fn in hit_f:
         nodes = flow_nodes(flows[fn])
         flow_view[fn] = flow_text(flows[fn])
         for n in nodes:
-            if n in comps and n not in scope:
-                scope.append(n)
+            members = node_to_comps(n, comps)
+            if n not in comps and members:
+                group_view[n] = members
+            for c in members:
+                if c not in scope:
+                    scope.append(c)
     q = (question or "").lower()
     known = []
     for inc in incidents:
@@ -842,7 +864,7 @@ def context(cluster, question, names=None, data=None, incidents=None):
         c = comps.get(n) or {}
         if not c.get("workload") and not c.get("external"):
             notes.append("%s: 워크로드를 모른다 → 클러스터에서 찾으면 지식에 더하자고 제안" % n)
-    return {"request": question, "cluster": cluster, "asked": picked_c, "flows": flow_view,
+    return {"request": question, "cluster": cluster, "asked": picked_c, "flows": flow_view, "groups": group_view,
             "components": {n: comps.get(n) or {} for n in scope}, "incidents": known, "normal": normal, "notes": notes}
 
 
@@ -850,6 +872,8 @@ def context_text(p):
     L = ["질문: %s" % p["request"], "말한 것: %s" % (", ".join(p["asked"]) or "(없음)")]
     for fn, nodes in p["flows"].items():
         L.append("흐름 %s: %s" % (fn, nodes))
+    for g, members in (p.get("groups") or {}).items():
+        L.append("그룹 %s: %s (흐름의 이 칸은 이 중 하나 이상을 지난다)" % (g, ", ".join(members)))
     if p["components"]:
         L.append("구성요소:")
         for n, c in p["components"].items():

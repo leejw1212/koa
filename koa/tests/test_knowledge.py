@@ -65,14 +65,36 @@ class Context(unittest.TestCase):
         self.assertEqual(K.node_to_comps("결제 대행", DATA["components"]), [])   # 별명은 흐름 칸이 아니다
         self.assertEqual(K.node_to_comps("shop", DATA["components"]), [])       # 부분 문자열로 붙지 않는다
 
-    def test_theme_picks_its_components(self):
-        d = {"components": {"a": {"theme": "결제"}, "b": {"theme": "결제"}, "c": {"theme": "인증"}},
+    def test_group_picks_its_components(self):
+        d = {"components": {"a": {"group": "결제"}, "b": {"group": "결제"}, "c": {"group": "인증"}},
              "flows": {}, "normal": []}
         p = K.context("c1", "결제 쪽이 이상해", data=d, incidents=[])
         self.assertEqual(p["asked"], ["a", "b"])
         self.assertEqual(K.context("c1", "", names=["인증"], data=d, incidents=[])["asked"], ["c"])
         d["components"]["결제"] = {}
-        self.assertTrue(any("테마 '결제'" in m for _, m in K.check("c1", d)))
+        self.assertTrue(any("그룹 '결제'" in m for _, m in K.check("c1", d)))
+
+    def test_group_as_flow_node(self):
+        # 클라이언트 → edge → wrapper(admin/manager/user) → nginx → api
+        d = {"components": {"client": {"external": True}, "edge": {"workload": "e/Deployment/edge"},
+                            "admin-wrapper": {"workload": "c/Deployment/admin", "group": "wrapper"},
+                            "manager-wrapper": {"workload": "c/Deployment/manager", "group": "wrapper"},
+                            "user-wrapper": {"workload": "c/Deployment/user", "group": "wrapper"},
+                            "nginx": {"workload": "i/Deployment/nginx"}, "api": {"workload": "b/Deployment/api"},
+                            "other": {"workload": "x/Deployment/other"}},
+             "flows": {"콘솔": {"hops": ["client", "edge", "wrapper", "nginx", "api"]}}, "normal": []}
+        self.assertEqual(K.node_to_comps("wrapper", d["components"]), ["admin-wrapper", "manager-wrapper", "user-wrapper"])
+        self.assertEqual(K.check("c1", d), [])
+        p = K.context("c1", "manager-wrapper 가 500 을 낸다", data=d, incidents=[])
+        self.assertIn("콘솔", p["flows"])                                   # 멤버를 물어도 그룹 칸의 흐름
+        self.assertEqual(p["groups"], {"wrapper": ["admin-wrapper", "manager-wrapper", "user-wrapper"]})
+        self.assertIn("user-wrapper", p["components"])
+        self.assertNotIn("other", p["components"])
+        self.assertIn("그룹 wrapper:", K.context_text(p))
+        # 띄어 쓴 이름은 그 구성요소 하나 (그룹 이름 'wrapper' 로 셋 다 잡히지 않게)
+        d["components"]["manager-console-wrapper"] = d["components"].pop("manager-wrapper")
+        self.assertEqual(K.context("c1", "manager console wrapper 에서 502", data=d, incidents=[])["asked"],
+                         ["manager-console-wrapper"])
 
     def test_explicit_name_by_alias(self):
         self.assertEqual(ctx("", names=["결제사"])["asked"], ["pay"])
@@ -227,8 +249,8 @@ class Migrate(unittest.TestCase):
         moved = K.migrate(d)
         self.assertTrue(moved)
         self.assertEqual(d["flows"]["f"]["hops"], ["console", "Gateway", "api", "db", "K8s Service"])
-        self.assertEqual(d["components"]["Gateway"]["workload"], ["gw/Deployment/public", "gw/Deployment/admin"])
-        self.assertEqual(d["components"]["Gateway"]["kind"], "gateway")
+        self.assertNotIn("Gateway", d["components"])                         # 공유 이름은 그룹으로
+        self.assertEqual(K.node_to_comps("Gateway", d["components"]), ["public-gw", "admin-gw"])
         self.assertEqual(d["components"]["console"]["aliases"], ["Console Wrapper", "콘솔"])  # 질문에서 부르는 말로 남는다
         self.assertFalse(any("flow_nodes" in c for c in d["components"].values()))
         self.assertEqual(d["normal"][0]["component"], "console")
@@ -242,6 +264,11 @@ class Migrate(unittest.TestCase):
         K.migrate(d)
         p = K.context("c", "public-gw 가 느려", data=d, incidents=[])
         self.assertIn("f", p["flows"])
+
+    def test_theme_becomes_group(self):
+        d = {"components": {"a": {"theme": "결제"}}, "flows": {}, "normal": []}
+        self.assertTrue(K.migrate(d))
+        self.assertEqual(d["components"]["a"], {"group": "결제"})
 
     def test_load_writes_once_with_backup(self):
         with tempfile.TemporaryDirectory() as t:
