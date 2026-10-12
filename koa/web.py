@@ -52,7 +52,8 @@ def get_knowledge(c):
     d = K.cluster_dir(c)
     if not d.is_dir():
         raise LookupError("지식이 없는 클러스터: %s" % c)
-    data = K.load_flows(c)
+    moved = []
+    data = K.load_flows(c, notes=moved)
     incs = K.load_incidents(c)
     for i in incs:
         i["text"] = i["body"] or incident_text_from_meta(i["meta"])
@@ -64,6 +65,7 @@ def get_knowledge(c):
         "incidents": incs,
         "suggestions": K.list_suggestions(c),
         "check": checks(K.check(c, data)),
+        "migrated": moved,
         "path": rel(d),
     }
 

@@ -59,9 +59,11 @@ components:                    # 사람이 부르는 이름 → k8s 워크로드
   orders-db:
     external: true             # 클러스터 밖. 로그 문구로만 판정
     aliases: [주문 DB]
-  api-gateway:
-    workload: shop/Deployment/api-gateway
-    flow_nodes: [Gateway]      # 흐름 노드 글자와 부분 문자열로 매칭 (여럿이 공유 가능)
+  pay-api:
+    workload: pay/Deployment/api
+    theme: 결제                # 테마: 화면에서 묶어 보이고, 질문에 '결제' 가 나오면 이 테마의 구성요소 전부
+  gateway:                     # 흐름 칸은 구성요소 이름 그대로. 여러 워크로드를 한 칸으로 묶을 때는 목록
+    workload: [edge/Deployment/public-gw, edge/Deployment/admin-gw]
 
 flows:
   order-async:
@@ -102,10 +104,14 @@ python3 koa/knowledge.py suggestions <c> | accept <c> <id> | dismiss <c> <id>
 python3 koa/knowledge.py check <c>                              # 워크로드·흐름 매칭 검사
 ```
 
+흐름의 각 칸(hop)은 **구성요소 이름 그대로** 쓴다. 이름이 정확히 같을 때만 그 구성요소로 본다 (별명·부분 문자열로 붙이지 않는다).
+별명(`aliases`)은 질문에서 부르는 말을 찾는 데만 쓴다. 예전 지식의 `flow_nodes` 는 읽을 때 한 번 옮긴다
+(흐름 칸을 구성요소 이름으로 바꾸고, 여럿이 공유하던 이름은 워크로드를 모은 구성요소로, 나머지는 별명으로). 옮기기 전 파일은 `flows.yaml.pre-names.bak`.
+
 `context` 가 꺼내는 범위: 질문에서 찾은(또는 `--with`) 구성요소 → 그걸 지나는 흐름 → 그 흐름 위 구성요소 → 이들과 관련된 과거 이슈·정상 패턴. 더 넓히지 않는다.
 못 찾으면 "어느 구성요소/흐름인지 사용자에게 묻는다" 고 알려 준다 — 클러스터 전체를 훑지 않는다. 사용자의 답은 새 별명으로 제안한다.
 
-`add` 는 더하기만 한다: 같은 이름·같은 워크로드의 구성요소는 목록 칸(aliases, log_signatures, flow_nodes)을 합치고 빈 칸만 채운다. 기존 흐름과 같거나 그 일부인 흐름은 건너뛴다. 저장 전 파일은 `flows.yaml.bak`.
+`add` 는 더하기만 한다: 같은 이름·같은 워크로드의 구성요소는 목록 칸(aliases, log_signatures)을 합치고 빈 칸만 채운다. 기존 흐름과 같거나 그 일부인 흐름은 건너뛴다. 저장 전 파일은 `flows.yaml.bak`.
 
 제안은 내용으로 중복을 거르고, 버린 제안은 기억해서 다시 내지 않는다. 이미 지식에 있는 내용이면 남기지 않는다.
 

@@ -81,19 +81,17 @@ equivalent; use query.py from the terminal, in scripts, or before the app has be
 Advice text lives in `koa/catalog.yaml` (`gap_advice`, component `fallback`). Improve it there,
 not in ad-hoc chat text.
 
-## 클러스터 지식 흐름 → 구성요소 매칭 (flow_nodes)
+## 클러스터 지식 흐름 → 구성요소 매칭
 
-흐름(flow) 경로의 노드와 구성요소(component)는 정확 일치만 되던 걸, 부분 매칭으로 개선했다(커밋 8b2d65c).
-- 매칭 대상은 구성요소 이름 + `aliases`(질문 매칭용) + `flow_nodes`(흐름 매칭 전용).
-  노드가 그 이름과 같거나 한쪽이 다른 쪽을 부분 문자열로 포함하면 매칭(node_to_comps).
-- 여러 구성요소가 같은 흐름 이름을 공유할 수 있다. 예: 흐름 노드 `Gateway` 는
-  `flow_nodes: [Gateway]` 를 둔 접근 게이트웨이 구성요소 여러 개를 동시에 가리킨다(예: public/manager/admin 게이트웨이).
-- `aliases` 는 질문에서 대상을 찾는 데 쓰므로 공통 이름을 넣으면 '질문에서 대상을 못 가린다' warn이 난다.
-  공통 이름은 `flow_nodes` 에, 고유한 부르는 말은 `aliases` 에 넣는다.
+- 흐름의 각 칸은 **구성요소 이름 그대로** 쓴다. 이름이 정확히 같을 때만 연결된다 (서버 `node_to_comps`, 웹 화면 같은 규칙).
+- 별명(`aliases`)은 질문에서 부르는 말을 찾는 데만 쓴다. 흐름 칸에 별명을 쓰면 연결되지 않고 check 가 알린다.
+- 칸 하나가 워크로드 여러 개를 뜻하면 (예: public/manager/admin 게이트웨이를 `Gateway` 한 칸으로) 그 이름의 구성요소를 만들고
+  `workload` 를 목록으로 둔다. 멤버 구성요소를 물어도 그 흐름이 잡힌다 (워크로드가 겹치면).
+- 구성요소마다 테마(`theme`, 하나)를 둘 수 있다. 흐름에는 안 쓰고, 웹 화면 묶음과 질문 매칭에만 쓴다:
+  질문에 테마 이름이 나오면(또는 `--with <테마>`) 그 테마의 구성요소 전부가 말한 것이 된다.
 - 질문이 여러 구성요소와 매칭되면(동점) plan 은 target 을 고정하지 않고 `candidates` 를 내보낸다.
-  웹 UI 조사 요청에서 '대상을 직접 선택' 칩을 보여주고, 선택 시 확인 순서가 그 대상 기준으로 재구성된다.
-  API: `POST /api/plan` body 에 `target` 을 넣으면(force_target) 그대로 고정.
-- 구성요소 편집 폼에 '흐름 매칭 이름' 필드가 있어 flow_nodes 를 쉼표 구분으로 입력/저장한다(save_shards 가 보존).
+- 예전 지식의 `flow_nodes` 는 `load_flows` 가 한 번 옮긴다 (흐름 칸을 이름으로, 공유 이름은 묶은 구성요소로, 나머지는 별명으로,
+  이전 파일은 `flows.yaml.pre-names.bak`). 웹 화면의 주황 칸을 누르면 기존 구성요소로 바꾸거나 새 구성요소로 더할 수 있다.
 
 ## Building cluster knowledge (flows) — any cluster, config + logs only
 
@@ -111,8 +109,7 @@ When the user asks for the request flow ("요청이 지나는 길 만들어줘")
    (OpenSearch/Loki) — still reads only. Normal patterns (`normal`) remain a human/analysis step.
 - Never hard-code a cluster's names, namespaces or local paths into code. If flowmap misses a hop, fix the
   general rule in `koa/flowmap.py` + add a case to `koa/tests/test_flowmap.py` (synthetic data).
-- A node shared via `flow_nodes` (one node standing for several components) shows workload `?` in `plan`
-  path lines; namespaces still come from the real components.
+- A node standing for several workloads is one component with a `workload` list; `context` prints all of them.
 
 ## Promoting candidate → verified (catalog maintenance, dev checkout)
 

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import knowledge as K  # noqa: E402
 
 # gw → shop-api → mq → shop-worker → 결제 대행(외부),  gw → shop-api → pg,  shop-worker → pg (정산)
-# alias 'shop' 이 shop-worker 에 부분 문자열로 걸리는 함정도 같이 둔다
+# alias 'shop' 이 shop-worker 에 부분 문자열로 걸리는 함정도 같이 둔다. 흐름 칸은 구성요소 이름 그대로.
 DATA = {
     "components": {
         "gw": {"workload": "edge/Deployment/gw", "kind": "ingress"},
@@ -20,7 +20,7 @@ DATA = {
         "mq": {"workload": "shop/StatefulSet/mq", "kind": "message-queue", "aliases": ["래빗"]},
         "shop-worker": {"workload": "shop/Deployment/worker", "kind": "app", "aliases": ["워커"]},
         "pg": {"workload": "data/StatefulSet/pg", "kind": "database"},
-        "pay": {"aliases": ["결제사"], "flow_nodes": ["결제 대행"], "external": True},
+        "pay": {"aliases": ["결제사", "결제 대행"], "external": True},
         "grafana": {"workload": "monitoring/Deployment/grafana"},
     },
     "flows": {
@@ -28,7 +28,7 @@ DATA = {
             {"from": "gw", "to": "shop-api", "role": "call"},
             {"from": "shop-api", "to": "mq", "role": "produce"},
             {"from": "mq", "to": "shop-worker", "role": "consume"},
-            {"from": "shop-worker", "to": "결제 대행", "role": "call"}]},
+            {"from": "shop-worker", "to": "pay", "role": "call"}]},
         "주문-조회": {"kind": "http", "hops": ["gw", "shop-api", "pg"]},
         "정산": {"kind": "http", "hops": ["shop-worker", "pg"]},
     },
@@ -58,10 +58,24 @@ class Context(unittest.TestCase):
         # 'shop-worker' 를 말했는데 alias 'shop' 때문에 shop-api 까지 잡히면 안 된다
         self.assertEqual(ctx("shop-worker 로그 봐줘")["asked"], ["shop-worker"])
 
-    def test_flow_node_resolves_to_component(self):
+    def test_flow_node_is_component_name(self):
         p = ctx("워커가 죽어")
         self.assertIn("pay", p["components"])
-        self.assertNotIn("결제 대행", p["components"])
+        self.assertEqual(K.node_to_comps("pay", DATA["components"]), ["pay"])
+        self.assertEqual(K.node_to_comps("결제 대행", DATA["components"]), [])   # 별명은 흐름 칸이 아니다
+        self.assertEqual(K.node_to_comps("shop", DATA["components"]), [])       # 부분 문자열로 붙지 않는다
+
+    def test_theme_picks_its_components(self):
+        d = {"components": {"a": {"theme": "결제"}, "b": {"theme": "결제"}, "c": {"theme": "인증"}},
+             "flows": {}, "normal": []}
+        p = K.context("c1", "결제 쪽이 이상해", data=d, incidents=[])
+        self.assertEqual(p["asked"], ["a", "b"])
+        self.assertEqual(K.context("c1", "", names=["인증"], data=d, incidents=[])["asked"], ["c"])
+        d["components"]["결제"] = {}
+        self.assertTrue(any("테마 '결제'" in m for _, m in K.check("c1", d)))
+
+    def test_explicit_name_by_alias(self):
+        self.assertEqual(ctx("", names=["결제사"])["asked"], ["pay"])
 
     def test_explicit_names(self):
         p = ctx("이거 봐줘", names=["주문-조회"])
@@ -193,6 +207,59 @@ class Store(unittest.TestCase):
         data = {"components": {n: {"workload": "ns/Deployment/%s" % n} for n in ("a", "b", "q", "w", "cache")},
                 "flows": {"f": f}, "normal": []}
         self.assertTrue(any("갈래" in m for _, m in K.check("c1", data)))
+
+
+class Migrate(unittest.TestCase):
+    """예전 지식: 흐름 칸이 flow_nodes·별명·대소문자 다른 이름으로 구성요소를 가리키던 것 → 구성요소 이름으로."""
+
+    def old(self):
+        return {"components": {
+            "public-gw": {"workload": "gw/Deployment/public", "kind": "gateway", "flow_nodes": ["Gateway"]},
+            "admin-gw": {"workload": "gw/Deployment/admin", "kind": "gateway", "flow_nodes": ["Gateway"]},
+            "console": {"workload": "ui/Deployment/console", "flow_nodes": ["Console Wrapper", "콘솔"]},
+            "api": {"workload": "app/Deployment/api", "aliases": ["에이피아이"]},
+            "db": {"workload": "data/StatefulSet/db"}},
+            "flows": {"f": {"hops": ["Console Wrapper", "Gateway", "에이피아이", "DB", "K8s Service"]}},
+            "normal": [{"component": "Console Wrapper", "note": "x"}]}
+
+    def test_rewrites_nodes_and_groups_shared(self):
+        d = self.old()
+        moved = K.migrate(d)
+        self.assertTrue(moved)
+        self.assertEqual(d["flows"]["f"]["hops"], ["console", "Gateway", "api", "db", "K8s Service"])
+        self.assertEqual(d["components"]["Gateway"]["workload"], ["gw/Deployment/public", "gw/Deployment/admin"])
+        self.assertEqual(d["components"]["Gateway"]["kind"], "gateway")
+        self.assertEqual(d["components"]["console"]["aliases"], ["Console Wrapper", "콘솔"])  # 질문에서 부르는 말로 남는다
+        self.assertFalse(any("flow_nodes" in c for c in d["components"].values()))
+        self.assertEqual(d["normal"][0]["component"], "console")
+        self.assertEqual(K.migrate(d), [])                                    # 두 번 해도 같다
+        chk = [m for _, m in K.check("c", d)]
+        self.assertTrue(any("K8s Service" in m for m in chk))                 # 모르는 칸은 남기고 알린다
+        self.assertFalse(any("'Gateway'" in m for m in chk))
+
+    def test_member_question_reaches_group_flow(self):
+        d = self.old()
+        K.migrate(d)
+        p = K.context("c", "public-gw 가 느려", data=d, incidents=[])
+        self.assertIn("f", p["flows"])
+
+    def test_load_writes_once_with_backup(self):
+        with tempfile.TemporaryDirectory() as t:
+            orig, K.KNOWLEDGE = K.KNOWLEDGE, Path(t)
+            try:
+                (Path(t) / "c").mkdir()
+                K._write_flows("c", self.old())
+                before = (Path(t) / "c" / "flows.yaml").read_text()
+                notes = []
+                K.load_flows("c", notes=notes)
+                self.assertTrue(notes)
+                self.assertEqual((Path(t) / "c" / "flows.yaml.pre-names.bak").read_text(), before)
+                self.assertNotIn("flow_nodes", (Path(t) / "c" / "flows.yaml").read_text())
+                again = []
+                K.load_flows("c", notes=again)
+                self.assertEqual(again, [])
+            finally:
+                K.KNOWLEDGE = orig
 
 
 if __name__ == "__main__":
