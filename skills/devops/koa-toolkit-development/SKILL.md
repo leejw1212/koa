@@ -155,8 +155,8 @@ On a machine without the LaunchAgent: copy that plist (paths adjusted) and `laun
 - A flow node is a component name, matched exactly (`node_to_comps`; the web `known()` uses the same rule).
   No alias or substring matching for flow nodes: two rules (fuzzy server, exact UI) made the screen and the
   analysis disagree. Aliases are only for finding components in the user's question (`mentions`,
-  `name_to_comps`). One node for several workloads = one component whose `workload` is a list.
-- `flow_nodes` is gone. `load_flows` runs `migrate` once on old files (rewrites nodes, groups shared names,
+  `name_to_comps`). A node may also be a `group` name (components share one `group`); it resolves to all members.
+- `flow_nodes` is gone. `load_flows` runs `migrate` once on old files (rewrites nodes, turns shared names into a `group`,
   moves the rest to aliases) and saves with `flows.yaml.pre-names.bak` — the one place a tool rewrites
   knowledge without a suggestion, approved by the user (2026-10-12) as a format change, not new content.
 - `context` returns the named components + every flow through them + the components on those flows +

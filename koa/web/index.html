@@ -110,6 +110,8 @@ textarea.editor { min-height: 520px; font-size: 14.5px; padding: 16px 18px; bord
 .node.ext { border-style: dashed; border-color: var(--faint); background: transparent; }
 .node.q { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .node.unk { border-color: var(--warn); cursor: pointer; }
+.node.grp { background: var(--accent-soft); color: var(--accent); border: 2px solid var(--accent); }
+.node small { margin-left: 4px; font-size: 10px; opacity: .75; }
 .klink select { width: auto; flex: 0 1 240px; }
 .klink { margin-top: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--warn); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .arrow { color: var(--faint); font-size: 13px; padding: 0 4px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; }
@@ -220,7 +222,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 
   <section class="card glass">
     <div class="row khdr"><h2 class="grow">흐름</h2><button class="btn" data-n="addFlow">＋ 흐름</button></div>
-    <p class="hint">요청이 지나는 길입니다. 분석은 이 길을 따라 정상에서 비정상으로 바뀌는 첫 지점을 찾습니다. 줄을 누르면 고칩니다. 흐름의 각 칸은 구성요소 이름 그대로 씁니다. <span class="node unk" style="font-size:11px;padding:0 8px">주황 테두리</span> 는 구성요소 이름이 아닌 칸이고 눌러서 연결합니다. <span class="node ext" style="font-size:11px;padding:0 8px">점선</span> 은 클러스터 밖.</p>
+    <p class="hint">요청이 지나는 길입니다. 분석은 이 길을 따라 정상에서 비정상으로 바뀌는 첫 지점을 찾습니다. 줄을 누르면 고칩니다. 흐름의 각 칸은 구성요소 이름이나 그룹 이름을 그대로 씁니다. <span class="node grp" style="font-size:11px;padding:0 8px">보라</span> 는 그룹(구성요소 여럿), <span class="node unk" style="font-size:11px;padding:0 8px">주황 테두리</span> 는 구성요소·그룹 이름이 아닌 칸이고 눌러서 연결합니다. <span class="node ext" style="font-size:11px;padding:0 8px">점선</span> 은 클러스터 밖.</p>
     <div id="kLink" class="klink" hidden></div>
     <div id="kFlows" class="klist"></div>
   </section>
@@ -238,7 +240,7 @@ details[open] > summary::before { transform: rotate(90deg); }
           <button class="btn ghost" id="kPickClose">닫기</button>
         </div>
       </div>
-      <p class="hint">질문 속 이름(별명)과 k8s 워크로드를 잇습니다. 줄을 누르면 고칩니다. 테마를 적으면 테마별로 묶이고, 질문에 테마 이름을 쓰면 그 구성요소를 모두 봅니다.</p>
+      <p class="hint">질문 속 이름(별명)과 k8s 워크로드를 잇습니다. 줄을 누르면 고칩니다. 그룹을 적으면 그룹별로 묶이고, 흐름 칸이나 질문에 그룹 이름을 쓰면 그 구성요소를 모두 가리킵니다.</p>
       <div id="kComps" class="klist"></div>
     </section>
     <section class="card glass">
@@ -284,7 +286,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 </main>
 <div id="toast" class="glass"></div>
 <datalist id="compNames"></datalist>
-<datalist id="themeNames"></datalist>
+<datalist id="groupNames"></datalist>
 <datalist id="workloadNames"></datalist>
 
 <script>
@@ -481,24 +483,28 @@ function renderStats() {
   const cc = $("#kChkChip"); if (cc) cc.onclick = () => { $("#kChecks").hidden = !$("#kChecks").hidden; };
 }
 function renderAll() { renderFlows(); renderComps(); renderNormal(); renderStats(); }
-// 흐름 칸 = 구성요소 이름 (서버 knowledge.node_to_comps 와 같은 규칙: 이름이 정확히 같을 때만)
-const known = n => SH.components[n] || null;
+// 흐름 칸 = 구성요소 이름 또는 그룹 이름 (서버 knowledge.node_to_comps 와 같은 규칙: 이름이 정확히 같을 때만)
+const groupOf = n => Object.keys(SH.components).filter(x => (SH.components[x].group || "").trim() === n);
+const known = n => SH.components[n] || (groupOf(n).length ? { group: n } : null);
 const wls = c => [].concat((c && c.workload) || []);
 function nodeHTML(n) {
+  if (!SH.components[n]) { const m = groupOf(n);
+    if (m.length) return `<span class="node grp" title="${esc("그룹: " + m.join(", "))}">${esc(n)}<small>×${m.length}</small></span>`; }
   const c = known(n);
   const cls = !c ? "unk" : c.kind === "message-queue" ? "q" : c.external ? "ext" : "";
-  return `<span class="node ${cls}" ${c ? "" : `data-unk="${esc(n)}"`} title="${esc(!c ? "구성요소 이름이 아님 — 눌러서 연결" : c.external ? "클러스터 밖" : wls(c).join(", "))}">${esc(n)}</span>`;
+  return `<span class="node ${cls}" ${c ? "" : `data-unk="${esc(n)}"`} title="${esc(!c ? "구성요소·그룹 이름이 아님 — 눌러서 연결" : c.external ? "클러스터 밖" : wls(c).join(", "))}">${esc(n)}</span>`;
 }
 // 주황 칸 연결: 기존 구성요소 이름으로 바꾸거나, 그 이름으로 구성요소를 만든다
 function similar(n) {
-  const l = n.toLowerCase(), names = Object.keys(SH.components);
-  const hit = names.filter(x => (SH.components[x].aliases || []).some(a => a.toLowerCase() === l)
+  const l = n.toLowerCase(), gs = [...new Set(Object.values(SH.components).map(c => (c.group || "").trim()).filter(Boolean))];
+  const names = gs.concat(Object.keys(SH.components).filter(x => !gs.includes(x)));
+  const hit = names.filter(x => ((SH.components[x] || {}).aliases || []).some(a => a.toLowerCase() === l)
     || (x.length >= 3 && l.length >= 3 && (x.toLowerCase().includes(l) || l.includes(x.toLowerCase()))));
   return hit.concat(names.filter(x => !hit.includes(x)).sort());
 }
 function showLink(n) {
   const opts = similar(n);
-  $("#kLink").innerHTML = `<span class="grow"><b>${esc(n)}</b> 은 구성요소 이름이 아닙니다.</span>
+  $("#kLink").innerHTML = `<span class="grow"><b>${esc(n)}</b> 은 구성요소·그룹 이름이 아닙니다.</span>
     ${opts.length ? `<select id="kLinkSel">${opts.map(x => `<option>${esc(x)}</option>`).join("")}</select><button class="btn" id="kLinkTo">이 구성요소로 바꾸기</button>` : ""}
     <button class="btn" id="kLinkNew">새 구성요소로 추가</button><button class="x" id="kLinkClose" title="닫기">×</button>`;
   $("#kLink").hidden = false; $("#kLink").dataset.node = n;
@@ -539,17 +545,17 @@ function compSum(n, c) {
   const tail = (c.aliases || []).slice(0, 3).map(a => `<span class="chip">${esc(a)}</span>`).join("") + ((c.aliases || []).length > 3 ? `<span class="chip">+${c.aliases.length - 3}</span>` : "");
   return `<span class="nm">${esc(n)}</span>${c.kind && KIND_LABEL[c.kind] ? `<span class="chip accent">${KIND_LABEL[c.kind]}</span>` : ""}${where}<span class="tail">${tail}</span>`;
 }
-// 구성요소 목록: 테마가 하나라도 있으면 테마별로 묶어 보여 준다 (머리를 누르면 접힘)
-const closedThemes = new Set();
+// 구성요소 목록: 그룹이 하나라도 있으면 그룹별로 묶어 보여 준다 (머리를 누르면 접힘)
+const closedGroups = new Set();
 function renderComps() {
   const ents = Object.entries(SH.components), groups = {};
-  ents.forEach(e => { const t = (e[1].theme || "").trim(); (groups[t] = groups[t] || []).push(e); });
+  ents.forEach(e => { const t = (e[1].group || "").trim(); (groups[t] = groups[t] || []).push(e); });
   const keys = Object.keys(groups).filter(Boolean).sort((a, b) => a.localeCompare(b, "ko"));
-  $("#themeNames").innerHTML = keys.map(t => `<option value="${esc(t)}">`).join("");
+  $("#groupNames").innerHTML = keys.map(t => `<option value="${esc(t)}">`).join("");
   const order = keys.concat(groups[""] && keys.length ? [""] : []);
   $("#kComps").innerHTML = (!keys.length ? ents.map(compRow).join("") : order.map(t => {
-    const shut = closedThemes.has(t);
-    return `<div class="kgroup" data-theme="${esc(t)}"><span class="grow">${t ? esc(t) : "테마 없음"}</span><span class="chip">${groups[t].length}</span><span>${shut ? "▸" : "▾"}</span></div>`
+    const shut = closedGroups.has(t);
+    return `<div class="kgroup" data-group="${esc(t)}"><span class="grow">${t ? esc(t) : "그룹 없음"}</span><span class="chip">${groups[t].length}</span><span>${shut ? "▸" : "▾"}</span></div>`
       + (shut ? "" : groups[t].map(compRow).join(""));
   }).join(""))
     || '<div class="kempty">아직 없습니다. "클러스터에서 고르기" 로 시작하세요.</div>';
@@ -560,7 +566,7 @@ function compRow([n, c]) {
       <div><label class="f">종류</label><select data-k="c" data-n="${esc(n)}" data-f="kind">${Object.entries(KIND_OPT).map(([v, l]) => `<option value="${v}" ${(c.kind || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="full"><label class="f">워크로드 (네임스페이스/종류/이름, 여러 개를 묶으면 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="workload" list="workloadNames" value="${esc(wls(c).join(", "))}" placeholder="shop/Deployment/order-api"></div>
       <div><label class="f">별명 (질문에서 부르는 말, 쉼표)</label><input data-k="c" data-n="${esc(n)}" data-f="aliases" value="${esc((c.aliases || []).join(", "))}"></div>
-      <div><label class="f">테마 (결제·인증 같은 묶음, 하나)</label><input data-k="c" data-n="${esc(n)}" data-f="theme" list="themeNames" value="${esc(c.theme || "")}" placeholder="결제"></div>
+      <div><label class="f">그룹 (흐름 칸으로도 쓰는 묶음, 하나)</label><input data-k="c" data-n="${esc(n)}" data-f="group" list="groupNames" value="${esc(c.group || "")}" placeholder="wrapper"></div>
       <div class="full"><label class="f">문제일 때 찍히는 로그 문구</label><input data-k="c" data-n="${esc(n)}" data-f="log" value="${esc((c.log_signatures || []).join(", "))}" placeholder="Too many connections"></div>
       <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`);
 }
@@ -584,7 +590,7 @@ function refreshSum(row) {
 // 줄 열고 닫기 · 삭제
 $("#tab-knowledge").addEventListener("click", e => {
   const grp = e.target.closest(".kgroup");
-  if (grp) { const t = grp.dataset.theme; closedThemes.has(t) ? closedThemes.delete(t) : closedThemes.add(t); renderComps(); return; }
+  if (grp) { const t = grp.dataset.group; closedGroups.has(t) ? closedGroups.delete(t) : closedGroups.add(t); renderComps(); return; }
   const unk = e.target.closest("[data-unk]");
   if (unk) { e.stopPropagation(); showLink(unk.dataset.unk); return; }
   const del = e.target.closest("[data-del]");
@@ -630,7 +636,7 @@ $("#tab-knowledge").addEventListener("input", e => {
 // 이름 바꾸기는 칸을 벗어날 때
 $("#tab-knowledge").addEventListener("change", e => {
   const t = e.target;
-  if (t.dataset.k === "c" && t.dataset.f === "theme") { closedThemes.delete((t.value || "").trim()); renderComps(); return; }
+  if (t.dataset.k === "c" && t.dataset.f === "group") { closedGroups.delete((t.value || "").trim()); renderAll(); return; }
   if (t.dataset.k !== "c" || t.dataset.f !== "name") return;
   const old = t.dataset.n, nn = t.value.trim();
   if (!nn || nn === old) { t.value = old; return; }
