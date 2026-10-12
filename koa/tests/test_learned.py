@@ -27,20 +27,6 @@ class LearnedTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_memory_read_and_delete(self):
-        m = L.memory()
-        self.assertEqual(m["memory"], ["기본 클러스터는 kind-lab", "사용자는 KST 로 말한다"])
-        self.assertEqual(m["user"], [])
-        left = L.delete_memory("memory", "기본 클러스터는 kind-lab")
-        self.assertEqual(left, ["사용자는 KST 로 말한다"])
-        self.assertEqual((self.h / "memories" / "MEMORY.md").read_text(), "사용자는 KST 로 말한다")
-
-    def test_delete_refuses_changed_or_bad_target(self):
-        with self.assertRaises(LookupError):
-            L.delete_memory("memory", "없는 항목")
-        with self.assertRaises(ValueError):
-            L.delete_memory("../x", "a")
-
     def test_only_koa_skills(self):
         names = [s["name"] for s in L.skills()]
         self.assertEqual(names, ["koa-learned", "agent-made", "edited"])  # 배운 요령 먼저, 기본 스킬 제외

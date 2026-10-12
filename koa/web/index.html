@@ -269,11 +269,6 @@ details[open] > summary::before { transform: rotate(90deg); }
     <div id="kNormal" class="klist"></div>
   </section>
   <section class="card glass">
-    <h2>메모리</h2>
-    <p class="hint">KOA 가 모든 대화에 가지고 다니는 짧은 사실입니다 (클러스터와 상관없는 사용자·환경 정보). 틀린 항목은 지우세요. 다음 새 채팅부터 반영됩니다.</p>
-    <div id="lMem"></div>
-  </section>
-  <section class="card glass">
     <h2>스킬</h2>
     <p class="hint">KOA 가 쓰면서 만들거나 고친 스킬입니다. <b>koa-learned</b> 는 분석하며 배운 요령(도구 쓰는 법, 함정)을 쌓는 곳이라 프로필 업데이트에도 남습니다. 원문은 영어라 줄을 펼치면 한국어 요약을 보여 줍니다 (처음 한 번 만들고, 스킬이 바뀌면 다시 만듭니다). 보기만 합니다 — 고칠 것은 KOA 채팅에 말하세요.</p>
     <div id="lSkills" class="klist"></div>
@@ -402,20 +397,11 @@ $("#kSug").addEventListener("click", async e => {
     S.k = await api(kpath()); renderKnowledge();
   } catch (err) { toast(err.message, 4000); }
 });
-// ---------- KOA 가 배운 것 (이 프로필의 메모리·스킬) ----------
+// ---------- KOA 가 배운 것 (이 프로필의 스킬) ----------
 const fmtTs = t => t ? String(t).replace("T", " ").slice(0, 16) : "";
 async function loadLearned() {
   try { S.learned = await api("learned"); } catch (err) { toast(err.message, 4000); return; }
-  const L = S.learned, names = { memory: "KOA 메모", user: "사용자" };
-  $("#lHome").textContent = "위치: " + L.home + " (memories/, skills/)";
-  $("#lMem").innerHTML = Object.keys(names).map(t => {
-    const es = L.memory[t] || [];
-    return `<div class="label" style="margin:12px 0 6px">${names[t]} <span class="faint">${es.length}개</span></div>` +
-      (es.length ? '<div class="klist">' + es.map((e, i) => `<div class="krow"><div class="ksum" style="cursor:default;align-items:flex-start">
-        <div class="grow" style="white-space:pre-wrap">${esc(e)}</div>
-        <button class="btn danger ghost" data-md="${t}" data-mi="${i}">지우기</button></div></div>`).join("") + "</div>"
-      : '<div class="kempty">아직 없습니다. KOA 가 분석하며 알게 된 사용자·환경 사실이 여기에 쌓입니다.</div>');
-  }).join("");
+  const L = S.learned;
   $("#lSkills").innerHTML = L.skills.length ? L.skills.map((k, i) => `<div class="krow"><div class="ksum" data-ls="${i}">
       <span class="nm">${esc(k.name)}</span>${k.learned ? '<span class="chip accent">배운 요령</span>' : ""}
       <span class="grow faint" style="white-space:normal">${esc(k.ko && k.ko.oneline || k.description)}</span>
@@ -434,13 +420,6 @@ async function loadLearned() {
     : '<div class="kempty">아직 없습니다. KOA 가 분석하며 배운 요령이 koa-learned 스킬에 쌓이면 여기에 보입니다.</div>';
   L.skills.forEach((k, i) => { if (openSkills.has(k.name)) $(`[data-lb="${i}"]`).hidden = false; });
 }
-$("#lMem").addEventListener("click", async e => {
-  const b = e.target.closest("[data-md]"); if (!b) return;
-  const t = b.dataset.md, text = S.learned.memory[t][+b.dataset.mi];
-  if (!confirm("이 메모리 항목을 지울까요?\n\n" + text)) return;
-  try { await api("learned/memory/delete", { target: t, text }); toast("지웠습니다"); loadLearned(); }
-  catch (err) { toast(err.message, 4000); }
-});
 // 요약은 우리가 만든 짧은 형식만: "## 제목", "- 목록", 나머지는 문단. 모두 이스케이프 후 `code` 만 살린다.
 function mdLite(t) {
   const inl = x => esc(x).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");

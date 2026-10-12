@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""KOA 가 쓰면서 배운 것: 이 프로필(HERMES_HOME)의 Hermes 메모리와, KOA 가 만들거나 고친 스킬.
+"""KOA 가 쓰면서 배운 것: KOA 가 만들거나 고친 스킬.
 
-- 메모리: memories/MEMORY.md (KOA 메모), memories/USER.md (사용자). 항목 구분은 Hermes 와 같은 "\\n§\\n".
-  지우기는 Hermes 와 같은 잠금 파일(<파일>.lock, flock)을 잡고 임시 파일 → rename 으로 쓴다.
 - 스킬: koa-learned (KOA 가 분석하며 배운 요령을 쌓는 스킬, 저장소에 없어서 프로필 업데이트가 덮지 않는다)
   + skills/.curator_ledger.jsonl 에 기록이 있는 스킬 + .usage.json 에 created_by: agent 인 스킬.
   보기만 한다.
@@ -32,63 +30,11 @@ try:
 except ImportError:  # Windows
     fcntl = None
 
-DELIM = "\n§\n"
 LEARNED_SKILL = "koa-learned"
-MEMORY_FILES = {"memory": "MEMORY.md", "user": "USER.md"}
 
 
 def home():
     return Path(paths.HERMES_HOME)
-
-
-# ---------- 메모리 ----------
-
-def _mem_path(target):
-    if target not in MEMORY_FILES:
-        raise ValueError("target 은 memory 또는 user")
-    return home() / "memories" / MEMORY_FILES[target]
-
-
-def _parse(raw):
-    return [e for e in (x.strip() for x in raw.split(DELIM)) if e]
-
-
-def memory():
-    out = {}
-    for t in MEMORY_FILES:
-        f = _mem_path(t)
-        out[t] = _parse(f.read_text(encoding="utf-8")) if f.is_file() else []
-    return out
-
-
-@contextmanager
-def _lock(path):
-    lock = path.with_suffix(path.suffix + ".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock), os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        if fcntl:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        if fcntl:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-
-
-def delete_memory(target, text):
-    """항목 하나를 지운다. text 는 화면에 보인 항목 전체 (같은 글자일 때만 지운다 — 그사이 바뀌었으면 거부)."""
-    f = _mem_path(target)
-    with _lock(f):
-        entries = _parse(f.read_text(encoding="utf-8")) if f.is_file() else []
-        if text not in entries:
-            raise LookupError("그 항목이 없다 (그사이 바뀌었을 수 있다. 새로고침)")
-        entries.remove(text)
-        fd, tmp = tempfile.mkstemp(dir=str(f.parent), prefix=".mem_")
-        with os.fdopen(fd, "w", encoding="utf-8") as w:
-            w.write(DELIM.join(entries))
-        os.replace(tmp, str(f))
-    return entries
 
 
 # ---------- 스킬 ----------
@@ -283,8 +229,7 @@ def summarize(name, timeout=240):
 
 
 def summary():
-    m = memory()
-    return {"home": str(home()), "memory": m, "skills": skills()}
+    return {"home": str(home()), "skills": skills()}
 
 
 if __name__ == "__main__":
@@ -298,10 +243,6 @@ if __name__ == "__main__":
         sys.exit(0)
     s = summary()
     print("HERMES_HOME:", s["home"])
-    for t, es in s["memory"].items():
-        print("메모리 %s: %d 항목" % (t, len(es)))
-        for e in es:
-            print("  - " + e.replace("\n", " ")[:120])
     print("스킬: %d" % len(s["skills"]))
     for k in s["skills"]:
         print("  %s%s  변경 %d · 사용 %d · %s" % (k["name"], " (배운 요령)" if k["learned"] else "",
