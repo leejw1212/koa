@@ -27,11 +27,14 @@ flows:
     hops: [ingress-nginx, gateway, order-api, orders-db]
   order-async:
     kind: queue
+    aliases: [주문 처리]           # 질문에서 이 흐름을 부르는 말
     hops:
       - {from: order-api, to: rabbitmq, via: "exchange orders / queue order.created", role: produce}
       - {from: rabbitmq, to: order-worker, via: "queue order.created", role: consume}
       - {from: order-worker, to: orders-db, role: call}
 
-# 정상인데 이상해 보이는 것
+# 노트. component 가 구성요소·그룹이면 그것을 볼 때만, 그 밖의 말(주제)이면 모든 분석에 같이 간다.
+# kind: rule(판정 규칙) | howto(보는 법) | pitfall(함정) | baseline(평소 수치) | structure(구조) | normal(정상 패턴)
 normal:
-  - {component: order-worker, note: "매일 02:00 정산 배치 때 큐가 쌓였다 30분 안에 빠진다"}
+  - {component: order-worker, note: "매일 02:00 정산 배치 때 큐가 쌓였다 30분 안에 빠진다", kind: normal}
+  - {component: Nginx 로그, note: "upstream_status 가 비고 504 면 백엔드 미도달 → 앱 로그는 볼 필요 없음", kind: rule}

@@ -42,13 +42,13 @@ KOA 가 하는 일 (스킬 `koa-cluster-discovery`):
 
 > rmq 소비가 안 돼 · 카드 만들기 흐름 봐줘
 
-1. 지식에서 그 구성요소·흐름·관련 과거 이슈·정상 패턴만 꺼낸다 (`koa/knowledge.py context`). 못 찾으면 어느 것인지 묻는다.
+1. 지식에서 그 구성요소·흐름·관련 과거 이슈·노트와 클러스터 전체 주제 노트만 꺼낸다 (`koa/knowledge.py context`). 이름을 못 찾으면 낱말이 겹치는 흐름으로 시작하고 그렇게 읽었다고 밝힌다. 그것도 없으면 어느 것인지 묻는다.
 2. 그 범위만 읽기 전용으로 확인하고 원인 지점과 근거를 보여 준다.
 3. "새로 알게 된 것" 표를 보여 주고, OK 하면 지식(`local/knowledge/<클러스터>/`)에 더한다.
 
 ### 웹 화면 (클러스터 지식 · 과거 이슈 · KOA 가 배운 것)
 
-YAML 을 직접 쓰지 않고, 구성요소·흐름·정상 패턴을 줄로 보고 줄을 눌러 그 자리에서 고친다. flowmap 이나 분석이 남긴 제안을 더하거나 버린다.
+YAML 을 직접 쓰지 않고, 구성요소·흐름·노트를 줄로 보고 줄을 눌러 그 자리에서 고친다. 노트에는 종류(판정 규칙·보는 법·함정·평소 수치·구조·정상 패턴)를 고른다. flowmap 이나 분석이 남긴 제안을 더하거나 버린다.
 웹에서 저장해도 그사이 KOA 채팅이 더한 지식은 지우지 않고 합친다. 이 컴퓨터에서만 열린다 (127.0.0.1).
 
 ```bash
@@ -64,7 +64,7 @@ cd ~/.hermes/profiles/koa && /usr/bin/python3 koa/web.py     # → http://127.0.
 | `SOUL.md` | KOA 정체성과 항상 지키는 규칙 (클러스터 무변경, 읽기 전용, 토큰은 사용자에게) | 모든 대화의 시스템 프롬프트 |
 | `skills/devops/` | `koa-cluster-discovery`, `cluster-incident-analysis`, `hermes-mcp-servers`, `kubernetes-agent-access` | 스킬 목록 → 해당 작업 때 로드 |
 | `config.yaml` | 모델, 터미널 `KUBECONFIG` 기본값. **MCP 는 비어 있음** (클러스터마다 온보딩 때 등록) | 프로필 설정 |
-| `koa/` | `discover.py`, `plan.py`, `query.py`, `knowledge.py`(클러스터 지식: 꺼내기·더하기·제안), `flowmap.py`(흐름 후보 → 제안), `web.py`(지식 편집 화면), `readonly.py`, `report.py`, `check_mcp.py`, `mcp_client.py`, `catalog.yaml` (MCP 정의·조회·검증 상태) | 도구 |
+| `koa/` | `discover.py`, `plan.py`, `query.py`, `knowledge.py`(클러스터 지식: 꺼내기·더하기·제안), `flowmap.py`(흐름 후보 → 제안), `web.py`(지식 편집 화면), `stats.py`(분석마다 시간·토큰·도구 호출, 세션 기록 읽기 전용), `readonly.py`, `report.py`, `check_mcp.py`, `mcp_client.py`, `catalog.yaml` (MCP 정의·조회·검증 상태) | 도구 |
 | `k8s/` | 읽기 전용 SA 매니페스트 + kubeconfig 생성 스크립트 | 클러스터 관리자용 |
 | `terminal/agent-env.sh` | 에이전트 터미널의 `KUBECONFIG` 를 읽기 전용 파일로 | `terminal.shell_init_files` |
 | `distribution.yaml` | 배포 매니페스트 (설치 대상 경로, 선택 env 목록) | – |

@@ -9,6 +9,7 @@
   python3 koa/knowledge.py check <클러스터>                        # 빈 곳·틀린 곳
   python3 koa/knowledge.py context <클러스터> "rmq 소비가 안 돼" [--with a,b]
                                                                 # 질문(또는 지정한 이름)에 해당하는 지식만 꺼낸다
+  python3 koa/knowledge.py notes <클러스터> [찾을 말] [--untyped]   # 노트 목록 (종류 없는 노트는 제안 종류와 함께)
   python3 koa/knowledge.py add <클러스터> '<json>' [--dry-run]     # 지식에 더한다 (지우거나 덮지 않음)
   python3 koa/knowledge.py incident <클러스터> '<json>'            # 과거 이슈 1건 기록
   python3 koa/knowledge.py suggest <클러스터> '<json>' --title "…" [--source 분석]   # 제안으로만 남긴다
@@ -18,8 +19,12 @@
 <json> 모양 (전부 선택):
   {"components": {"order-api": {"workload": "shop/Deployment/order-api", "kind": "app", "group": "주문",
                                 "aliases": ["주문 API"], "log_signatures": ["Too many connections"]}},
-   "flows": [{"name": "주문", "nodes": ["ingress-nginx", "order-api", "orders-db"]}],
-   "normal": [{"component": "order-worker", "note": "매일 02:00 배치 때 큐가 쌓였다 빠진다"}]}
+   "flows": [{"name": "주문", "nodes": ["ingress-nginx", "order-api", "orders-db"], "aliases": ["주문 넣기"]}],
+   "normal": [{"component": "order-worker", "note": "매일 02:00 배치 때 큐가 쌓였다 빠진다", "kind": "normal"},
+              {"component": "Nginx 로그", "note": "upstream_status 가 비고 504 면 백엔드 미도달", "kind": "rule"}]}
+  기존 흐름에 부르는 말만 더할 때: {"flows": [{"name": "주문", "aliases": ["주문 넣기"]}]}
+  노트(normal): component 가 구성요소·그룹 이름이면 그것에 붙은 노트, 아니면 클러스터 전체 '주제 노트' (예: "Nginx 로그").
+  kind: rule(판정 규칙) · howto(보는 법) · pitfall(함정) · baseline(평소 수치) · structure(구조) · normal(정상 패턴), 없으면 종류 없음.
 incident: {"date": "2026-10-11", "components": ["rabbitmq"], "logs": ["disk resource limit alarm set"],
            "cause": "PVC 90% → 디스크 알람", "body": "자유 서술"}
 
@@ -44,7 +49,30 @@ QUEUE_WORDS = re.compile(r"rabbit|rmq|kafka|sqs|nats|pulsar|queue|큐|^mq$|-mq$|
 QUOTED = re.compile(r"[\"“”'‘’`]([^\"“”'‘’`]{4,120})[\"“”'‘’`]")
 LIST_FIELDS = ("aliases", "log_signatures")
 SCALAR_FIELDS = ("workload", "kind", "tier", "external", "group")
-HEADER = "# KOA 클러스터 지식 — 구성요소 · 흐름 · 정상 패턴. 웹 화면이나 knowledge.py add 로 고친다.\n"
+HEADER = "# KOA 클러스터 지식 — 구성요소 · 흐름 · 노트. 웹 화면이나 knowledge.py add 로 고친다.\n"
+
+# 노트 종류: 분석이 노트를 어떻게 쓰는지 정한다. 파일에는 영어 키, 화면·출력에는 이름과 쓰는 법.
+NOTE_KINDS = {
+    "rule": ("판정 규칙", "어느 hop 탓인지 가르고 다음에 볼 곳을 정한다"),
+    "howto": ("보는 법", "이대로 조회한다 (인덱스 목록·매핑을 더듬기 전에)"),
+    "pitfall": ("함정", "데이터를 읽을 때 보정한다"),
+    "baseline": ("평소 수치", "지금 값과 견준다 (잰 날짜를 같이 본다)"),
+    "structure": ("구조", "흐름·구성요소를 읽을 때 쓴다"),
+    "normal": ("정상 패턴", "같으면 원인이 아니다"),
+}
+UNTYPED = ("노트", "종류 없음 — 내용대로 쓴다")
+# 주제 노트를 고를 때 먼저 넣는 종류 (종류 없는 노트는 제안 종류로 줄을 세운다)
+KIND_RANK = ("rule", "pitfall", "howto", "structure", "baseline", "normal")
+TOPIC_BUDGET = 3000   # context 에 넣는 주제 노트 글자 수 상한 (넘는 것은 주제 이름과 개수만 알린다)
+# 노트 글에서 종류를 짐작하는 단서. 점수 = 겹친 단서 수(둘까지) × 무게, 같으면 앞 종류. 제안일 뿐이고 사용자가 고른다
+KIND_CUES = (
+    ("pitfall", 5, re.compile(r"오프셋|공존|보정|주의|착각|섞여|섞인|아니라|다르다|다름|함정|조심|헷갈")),
+    ("rule", 3, re.compile(r"[가-힣]*[가-힣]면(?=[\s,;.:→)]|$)|일 때|인 경우")),
+    ("structure", 1, re.compile(r"호출|발행|연결|구독|경로|upstream|→|흐름|백엔드")),
+    ("howto", 2, re.compile(r"인덱스|조회|라벨|필터|쿼리|grep|좁혀|교차|매칭|잇는다|쌍이|추적|확인|검색")),
+    ("baseline", 1, re.compile(r"\d[\d,.]*\s*(?:건|회|개|ms|초)|실측|평소|\b\d+h\b")),
+    ("normal", 1, re.compile(r"매일|새벽|배치|정상|원래|항상|일시적|재시작")),
+)
 
 
 # ---------- 읽기 ----------
@@ -202,6 +230,74 @@ def similar_comps(node, comps):
         return hit
     nl = str(node or "").lower()
     return [n for n in (comps or {}) if len(n) >= 3 and len(nl) >= 3 and (n.lower() in nl or nl in n.lower())]
+
+
+def note_kind(value):
+    """노트 종류 값 → 키. 영어 키나 이름('판정 규칙', '판정규칙') 둘 다 받는다. 빈 값은 '', 모르는 값은 None."""
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    if v in NOTE_KINDS:
+        return v
+    flat = v.replace(" ", "")
+    return next((k for k, (label, _) in NOTE_KINDS.items() if label.replace(" ", "") == flat), None)
+
+
+def kind_label(kind):
+    return NOTE_KINDS.get(kind or "", UNTYPED)[0]
+
+
+def suggest_kind(note):
+    """노트 글에서 종류를 짐작한다 (웹 '종류 제안', notes --untyped). 단서가 없으면 None. 사용자가 고르기 전엔 쓰지 않는다."""
+    best, top = None, 0
+    for kind, weight, rx in KIND_CUES:
+        score = min(2, len({m.group(0) for m in rx.finditer(str(note or ""))})) * weight
+        if score > top:
+            best, top = kind, score
+    return best
+
+
+def is_topic(target, comps):
+    """노트 대상이 구성요소·그룹(이름이나 별명)이 아니면 클러스터 전체 주제 노트 (예: 'Nginx 로그', '알림 인덱스')."""
+    return not (node_to_comps(target, comps) or name_to_comps(target, comps))
+
+
+def str_list(v, drop=None):
+    """목록 칸 값 정리: 문자열 목록(또는 쉼표로 나눈 글) → 앞뒤 공백 없는 중복 없는 목록."""
+    if isinstance(v, str):
+        v = v.split(",")
+    out = []
+    for x in v if isinstance(v, list) else []:
+        x = str(x or "").strip()
+        if x and x != drop and x not in out:
+            out.append(x)
+    return out
+
+
+PARTICLE = re.compile(r"(?:으로는|에서는|에서|으로|까지|부터|이랑|하고|에게|한테|처럼|보다|에는|에도|이나|은|는|이|가|을|를|에|의|도|로|와|과|만|요|랑)$")
+STOP_WORDS = {"나요", "돼요", "되요", "해요", "에요", "예요", "어요", "아요", "있어요", "없어요", "같아요", "그리고", "근데", "그런데",
+              "the", "and", "for", "with", "not", "are", "was", "has", "from", "this", "that"}
+
+
+def words(text):
+    """질문을 견줄 낱말로: 한글 두 글자 이상(조사는 뗀다: '콘솔에서' → '콘솔'), 영문·숫자 세 글자 이상.
+    'nginx-gateway' 처럼 이어진 말은 통째로와 조각(nginx, gateway) 둘 다. 조사·어미만 있는 말은 뺀다."""
+    out = []
+    for w in re.findall(r"[가-힣]+|[0-9A-Za-z][0-9A-Za-z_.-]*", str(text or "").lower()):
+        w = w.strip("._-")
+        if not w or w in STOP_WORDS:
+            continue
+        if re.match(r"[가-힣]", w):
+            if PARTICLE.fullmatch(w):
+                continue
+            cut = PARTICLE.sub("", w)
+            cands = [cut if len(cut) >= 2 else w]
+        else:
+            cands = [w] + re.split(r"[_.-]+", w)
+        for c in cands:
+            if c and c not in out and (len(c) >= 2 if re.match(r"[가-힣]", c) else len(c) >= 3):
+                out.append(c)
+    return out
 
 
 def migrate(data):
@@ -408,16 +504,30 @@ def _clean_comp(c):
     return comp
 
 
+def clean_note(x):
+    """노트 한 줄 정리: {component, note, kind?}. kind 는 아는 종류만 (영어 키로), 비면 뺀다. 대상·글이 없으면 None."""
+    x = x if isinstance(x, dict) else {}
+    c, note = str(x.get("component") or "").strip(), str(x.get("note") or "").strip()
+    if not c or not note:
+        return None
+    item = {"component": c, "note": note}
+    k = note_kind(x.get("kind"))
+    if k:
+        item["kind"] = k
+    return item
+
+
 def _norm(sdata):
     """웹 화면 상태(흐름이 목록) 또는 load_flows 결과(흐름이 {이름: {kind, hops}})를 한 모양으로:
-    {"components": {이름: 칸}, "flows": {이름: {"kind", "nodes"}}, "normal": [{component, note}]}.
-    저장(save_shards)과 합치기(merge3)가 같은 규칙으로 보게 한다."""
+    {"components": {이름: 칸}, "flows": {이름: {"kind", "nodes", "aliases"?}}, "normal": [{component, note, kind?}]}.
+    저장(save_shards)과 합치기(merge3)가 같은 규칙으로 보게 한다. 같은 대상·같은 글의 노트는 처음 것만 남긴다."""
     sdata = sdata if isinstance(sdata, dict) else {}
     cin = sdata.get("components") if isinstance(sdata.get("components"), dict) else {}
     comps = {str(n): _clean_comp(c) for n, c in cin.items() if n}
     fin = sdata.get("flows") or []
     if isinstance(fin, dict):
-        fin = [{"name": n, "kind": (f or {}).get("kind"), "nodes": flow_nodes(f)} for n, f in fin.items()]
+        fin = [{"name": n, "kind": (f or {}).get("kind"), "nodes": flow_nodes(f), "aliases": (f or {}).get("aliases")}
+               for n, f in fin.items()]
     flows = {}
     for fl in fin if isinstance(fin, list) else []:
         fl = fl if isinstance(fl, dict) else {}
@@ -425,12 +535,15 @@ def _norm(sdata):
         nodes = [str(x).strip() for x in (fl.get("nodes") or []) if x and str(x).strip()]
         if name and len(nodes) >= 2:
             flows[name] = {"kind": fl.get("kind") or _hops(nodes, comps)[1], "nodes": nodes}
-    normal = []
+            al = str_list(fl.get("aliases"), drop=name)
+            if al:
+                flows[name]["aliases"] = al
+    normal, seen = [], set()
     for x in sdata.get("normal") if isinstance(sdata.get("normal"), list) else []:
-        x = x if isinstance(x, dict) else {}
-        c, note = str(x.get("component") or "").strip(), str(x.get("note") or "").strip()
-        if c and note and {"component": c, "note": note} not in normal:
-            normal.append({"component": c, "note": note})
+        item = clean_note(x)
+        if item and (item["component"], item["note"]) not in seen:
+            seen.add((item["component"], item["note"]))
+            normal.append(item)
     return {"components": comps, "flows": flows, "normal": normal}
 
 
@@ -478,14 +591,15 @@ def _merge_one(b, m, t, fields):
 
 def merge3(base, mine, theirs):
     """세 갈래 합치기 (모두 _norm 모양). base = 읽었던 것, mine = 그 위에 고친 것, theirs = 지금 파일.
-    한쪽만 바꾼 것은 그쪽을 따른다. 구성요소는 칸별로 합치고, 별명·로그 문구와 정상 패턴은 양쪽에서 더하고 뺀 것을 모두 남긴다.
-    같은 칸·같은 흐름을 양쪽에서 다르게 고쳤으면 Conflict. 반환: (합친 것, theirs 에서 들어온 변경 설명 목록)."""
+    한쪽만 바꾼 것은 그쪽을 따른다. 구성요소·흐름은 칸별로 합치고, 별명·로그 문구와 노트는 양쪽에서 더하고 뺀 것을 모두 남긴다.
+    같은 칸(흐름이면 경로·종류)을 양쪽에서 다르게 고쳤거나, 같은 노트의 종류를 양쪽에서 다르게 정했으면 Conflict.
+    반환: (합친 것, theirs 에서 들어온 변경 설명 목록)."""
     out, came, bad = {}, [], []
     for key, label in (("components", "구성요소"), ("flows", "흐름")):
         b, m, t = base[key], mine[key], theirs[key]
         res = {}
         for n in list(m) + [n for n in t if n not in m] + [n for n in b if n not in m and n not in t]:
-            v, why = _merge_one(b.get(n), m.get(n), t.get(n), key == "components")
+            v, why = _merge_one(b.get(n), m.get(n), t.get(n), True)
             if why:
                 bad += ["%s %s%s" % (label, n, "(%s)" % w if w else "") for w in why]
                 continue
@@ -495,8 +609,14 @@ def merge3(base, mine, theirs):
                 came.append("%s %s%s" % (label, n, " (지움)" if t.get(n) is None else ""))
         out[key] = res
     out["normal"] = _merge_list(base["normal"], mine["normal"], theirs["normal"])
-    came += ["정상 패턴 %s" % x["component"] for x in theirs["normal"] if x not in base["normal"] and x not in mine["normal"]]
-    came += ["정상 패턴 %s (지움)" % x["component"] for x in base["normal"] if x not in theirs["normal"] and x in mine["normal"]]
+    kinds = {}
+    for x in out["normal"]:          # 한쪽은 종류를 rule 로, 다른 쪽은 howto 로 정한 같은 노트
+        k = (x["component"], x["note"])
+        if k in kinds and kinds[k] != x.get("kind"):
+            bad.append("노트 %s (종류)" % x["component"])
+        kinds.setdefault(k, x.get("kind"))
+    came += ["노트 %s" % x["component"] for x in theirs["normal"] if x not in base["normal"] and x not in mine["normal"]]
+    came += ["노트 %s (지움)" % x["component"] for x in base["normal"] if x not in theirs["normal"] and x in mine["normal"]]
     if bad:
         raise Conflict(bad)
     return out, came
@@ -504,7 +624,7 @@ def merge3(base, mine, theirs):
 
 def save_shards(cluster, sdata, base=None):
     """웹 편집 화면의 전체 상태를 flows.yaml 로 쓴다.
-    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[…]}], "normal": [{component, note}]}
+    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[…],"aliases":[…]}], "normal": [{component, note, kind}]}
     base: {"version": 읽을 때의 version(), "data": 그때 상태}. 주면, 그사이 파일이 바뀌었을 때 덮어쓰지 않고 merge3 로 합쳐 쓴다
     (웹에서 저장해도 KOA 채팅이 그사이 더한 것이 지워지지 않게). 같은 곳이 겹치면 Conflict 를 내고 쓰지 않는다.
     반환의 "merged": 다른 쪽에서 들어와 함께 저장된 것 (없으면 [])."""
@@ -515,6 +635,8 @@ def save_shards(cluster, sdata, base=None):
     for name, f in s["flows"].items():
         hops, kind = _hops(f["nodes"], comps, f["kind"])
         flows[name] = {"kind": kind, "hops": hops}
+        if f.get("aliases"):
+            flows[name]["aliases"] = f["aliases"]
     data = {"schema": "koa.knowledge/v1", "cluster": cluster, "components": comps, "flows": flows, "normal": s["normal"]}
     _write_flows(cluster, data)
     return {"components": comps, "flows": flows, "normal": s["normal"], "check": check(cluster, data), "merged": merged}
@@ -523,9 +645,11 @@ def save_shards(cluster, sdata, base=None):
 def apply_additions(cluster, add, apply=True):
     """지식에 더한다. 기존 것은 지우거나 덮지 않는다:
     - 같은 이름 또는 같은 workload 의 구성요소 → 목록 칸(aliases·log_signatures)은 합치고, 빈 칸만 채운다
-    - 기존 흐름과 같거나 그 일부인 흐름 → 건너뛴다
-    반환: {"components": [새 이름], "updated": {이름: [칸]}, "flows": [(이름, 노드)], "normal": [...],
-          "skipped": [(이름, 이유)], "check": [...], "saved": bool, "changed": bool}"""
+    - 기존 흐름과 같거나 그 일부인 흐름 → 건너뛴다. 기존 흐름 이름 + aliases 만 주면 그 흐름에 별명을 더한다
+    - 같은 대상·같은 글의 노트 → 종류가 비어 있을 때만 채운다 (정해 둔 종류는 안 바꾼다)
+    반환: {"components": [새 이름], "updated": {이름: [칸]}, "flows": [(이름, 노드)], "flow_aliases": {이름: [새 별명]},
+          "normal": [새 노트], "kinded": [종류를 채운 노트], "skipped": [(이름, 이유)], "check": [...],
+          "saved": bool, "changed": bool}"""
     meta = {}
     data = load_flows(cluster, meta=meta)
     comps = {n: dict(c or {}) for n, c in data["components"].items()}
@@ -567,13 +691,27 @@ def apply_additions(cluster, add, apply=True):
     def inside(short, long_):
         return any(long_[i:i + len(short)] == short for i in range(len(long_) - len(short) + 1))
 
-    flows = [{"name": n, "kind": f.get("kind"), "nodes": flow_nodes(f)} for n, f in data["flows"].items()]
+    flows = [{"name": n, "kind": f.get("kind"), "nodes": flow_nodes(f), "aliases": str_list(f.get("aliases"), drop=n)}
+             for n, f in data["flows"].items()]
+    by_name = {f["name"]: f for f in flows}
     old = [canon(f["nodes"]) for f in flows]
     names = {f["name"] for f in flows}
-    added_f, skipped = [], []
+    added_f, aliased, skipped = [], {}, []
     for f in ((add or {}).get("flows") or []):
+        f = f if isinstance(f, dict) else {}
         nodes = [rename.get(x, x) for x in (f.get("nodes") or []) if x]
-        base = f.get("name") or " → ".join(nodes)
+        al = str_list(f.get("aliases"))
+        given = str(f.get("name") or "").strip()
+        base = given or " → ".join(nodes)
+        cur = by_name.get(given)
+        if cur is not None and al and (not nodes or nodes == cur["nodes"]):
+            new = [a for a in al if a not in cur["aliases"] and a != given]       # 기존 흐름에 부르는 말만 더한다
+            if new:
+                cur["aliases"] += new
+                aliased[given] = aliased.get(given, []) + new
+            else:
+                skipped.append((given, "별명이 이미 있다"))
+            continue
         if len(nodes) < 2:
             skipped.append((base, "노드가 2개 미만"))
             continue
@@ -586,26 +724,40 @@ def apply_additions(cluster, add, apply=True):
             name, j = "%s (%d)" % (base, j), j + 1
         names.add(name)
         old.append(c)
-        flows.append({"name": name, "kind": f.get("kind"), "nodes": nodes})
+        flows.append({"name": name, "kind": f.get("kind"), "nodes": nodes, "aliases": [a for a in al if a != name]})
         added_f.append((name, nodes))
-    normal = list(data["normal"])
-    added_n = []
+    normal = [dict(x) for x in data["normal"] if isinstance(x, dict)]
+    added_n, kinded = [], []
     for x in ((add or {}).get("normal") or []):
-        item = {"component": rename.get(x.get("component"), x.get("component")), "note": (x.get("note") or "").strip()}
-        if item["component"] and item["note"] and item not in normal:
+        x = dict(x) if isinstance(x, dict) else {}
+        x["component"] = rename.get(x.get("component"), x.get("component"))
+        item = clean_note(x)
+        if not item:
+            continue
+        if note_kind(x.get("kind")) is None:
+            skipped.append(("노트 %s" % item["component"], "종류 '%s' 를 모른다 (%s 중 하나)" % (
+                x.get("kind"), ", ".join("%s=%s" % (k, v[0]) for k, v in NOTE_KINDS.items()))))
+            continue
+        cur = next((n for n in normal if n.get("component") == item["component"]
+                    and str(n.get("note") or "").strip() == item["note"]), None)
+        if cur is None:
             normal.append(item)
             added_n.append(item)
-    changed = bool(added_c or updated or added_f or added_n)
+        elif item.get("kind") and not note_kind(cur.get("kind")):
+            cur["kind"] = item["kind"]
+            kinded.append(dict(cur))
+    changed = bool(added_c or updated or added_f or aliased or added_n or kinded)
     sdata = {"components": comps, "flows": flows, "normal": normal}
-    out = {"components": added_c, "updated": updated, "flows": added_f, "normal": added_n, "skipped": skipped,
-           "saved": False, "changed": changed}
+    out = {"components": added_c, "updated": updated, "flows": added_f, "flow_aliases": aliased, "normal": added_n,
+           "kinded": kinded, "skipped": skipped, "saved": False, "changed": changed}
     if apply and changed:
         # 읽고 쓰는 사이 웹에서 저장했어도 그 변경을 지우지 않게 읽은 버전을 같이 준다
         out["check"] = save_shards(cluster, sdata, base={"version": meta["version"], "data": data})["check"]
         out["saved"] = True
     else:
         tmp = {"components": comps, "normal": normal,
-               "flows": {f["name"]: {"kind": f.get("kind") or "http", "hops": f["nodes"]} for f in flows}}
+               "flows": {f["name"]: {"kind": f.get("kind") or "http", "hops": f["nodes"], "aliases": f["aliases"]}
+                         for f in flows}}
         out["check"] = check(cluster, tmp)
     return out
 
@@ -618,11 +770,20 @@ def additions_text(r):
         L.append("~ 구성요소 %s (%s)" % (n, ", ".join(ks)))
     for n, nodes in r["flows"]:
         L.append("+ 흐름 %s: %s" % (n, " → ".join(nodes)))
+    for n, al in (r.get("flow_aliases") or {}).items():
+        L.append("~ 흐름 %s (별명: %s)" % (n, ", ".join(al)))
     for x in r["normal"]:
-        L.append("+ 정상 패턴 %s: %s" % (x["component"], x["note"]))
+        L.append("+ 노트 %s [%s]: %s" % (x["component"], kind_label(x.get("kind")), x["note"]))
+    for x in r.get("kinded") or []:
+        L.append("~ 노트 %s: 종류 → %s (%s)" % (x["component"], kind_label(x.get("kind")), _short(x["note"], 40)))
     for n, why in r["skipped"]:
         L.append("= %s: %s" % (n, why))
     return "\n".join(L) or "(더할 것 없음 — 이미 있다)"
+
+
+def _short(text, limit):
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    return t if len(t) <= limit else t[:limit - 1] + "…"
 
 
 def slug(text, limit=40):
@@ -747,7 +908,9 @@ def _skey(add):
     """같은 제안을 알아보는 열쇠: 흐름은 노드(워크로드) 순서, 그 밖은 내용 전체."""
     comps = (add or {}).get("components") or {}
     wl = lambda n: (comps.get(n) or {}).get("workload") or n  # noqa: E731
-    parts = [" > ".join(wl(n) for n in f.get("nodes") or []) for f in (add or {}).get("flows") or []]
+    # 노드 없는 흐름(기존 흐름에 별명만 더하는 제안)은 내용 전체로
+    parts = [" > ".join(wl(n) for n in f.get("nodes") or []) or json.dumps(f, sort_keys=True, ensure_ascii=False)
+             for f in (add or {}).get("flows") or []]
     if not parts:
         parts = [json.dumps(add, sort_keys=True, ensure_ascii=False, default=str)]
     return hashlib.sha1("|".join(sorted(parts)).encode()).hexdigest()[:10]
@@ -864,9 +1027,33 @@ def check(cluster, data=None):
         if ";" in flow_text(f):
             out.append(("warn", "흐름 %s: 한 줄이 아니라 갈래가 있다 (%s). 웹 화면은 한 줄로만 다뤄 저장하면 순서가 바뀐다 → "
                                 "갈래는 별도 흐름으로 (knowledge.py add)" % (fname, flow_text(f))))
+    names = {g.lower(): "그룹 %s" % g for g in groups(comps)}
+    names.update({k: "구성요소 %s" % v for k, v in owner.items()})
+    fowner = {}
+    for fname in (data.get("flows") or {}):
+        fowner[str(fname).lower()] = fname
+    for fname, f in (data.get("flows") or {}).items():
+        for a in str_list((f or {}).get("aliases"), drop=fname):
+            k = a.lower()
+            if k in names:
+                out.append(("warn", "흐름 %s: 별명 '%s' 가 %s 의 이름과 같다 (질문에서 못 가린다)" % (fname, a, names[k])))
+            elif k in fowner and fowner[k] != fname:
+                out.append(("warn", "'%s' 가 흐름 %s 와 %s 둘 다의 이름이다 (질문에서 못 가린다)" % (a, fowner[k], fname)))
+            fowner.setdefault(k, fname)
+    # 노트: 구성요소·그룹(이름이나 별명)이 아닌 대상은 클러스터 전체 주제 노트라 괜찮다.
+    # 띄어쓰기 없는 대상이 구성요소 이름과 겹치면 이름을 잘못 쓴 것일 수 있어 알린다 (주제 노트로 읽히고 있다고)
     for n in data.get("normal") or []:
-        if isinstance(n, dict) and n.get("component") and not node_to_comps(n["component"], comps):
-            out.append(("warn", "정상 패턴: '%s' 는 구성요소·그룹 이름이 아니다" % n["component"]))
+        if not isinstance(n, dict) or not n.get("component"):
+            continue
+        tgt = str(n["component"])
+        if note_kind(n.get("kind")) is None:
+            out.append(("warn", "노트 %s: 종류 '%s' 를 모른다 → %s 중 하나" % (
+                tgt, n.get("kind"), ", ".join("%s(%s)" % (k, v[0]) for k, v in NOTE_KINDS.items()))))
+        if is_topic(tgt, comps) and " " not in tgt.strip():
+            hint = similar_comps(tgt, comps)
+            if hint:
+                out.append(("warn", "노트 '%s' 는 구성요소·그룹 이름이 아니라 주제 노트로 읽힌다 → %s 에 붙일 거면 그 이름으로 고친다" % (
+                    tgt, " / ".join(hint[:3]))))
     seen, uniq = set(), []
     for x in out:
         if x not in seen:
@@ -890,7 +1077,7 @@ def groups(comps):
 
 def mentions(text, comps, flows=None):
     """질문에 나온 구성요소·흐름 (나온 순서). 긴 이름부터 맞추고 맞춘 자리는 지워서 'shop-worker' 가 'shop' 으로 또 잡히지 않게.
-    그룹 이름을 말하면 그 그룹의 구성요소 전부 ("wrapper 가 이상해")."""
+    그룹 이름을 말하면 그 그룹의 구성요소 전부 ("wrapper 가 이상해"). 흐름은 이름이나 별명 ("카드 만들기")."""
     norm = lambda x: re.sub(r"[-_\s]+", " ", str(x).lower()).strip()  # noqa: E731  'manager console wrapper' = 'manager-console-wrapper'
     low = " %s " % norm(text or "")
     terms = []
@@ -900,8 +1087,10 @@ def mentions(text, comps, flows=None):
         for a in [n] + list((c or {}).get("aliases") or []):
             if str(a).strip():
                 terms.append((norm(a), "c", n))
-    for n in (flows or {}):
-        terms.append((norm(n), "f", n))
+    for n, f in (flows or {}).items():
+        for a in [n] + str_list((f or {}).get("aliases") if isinstance(f, dict) else None):
+            if str(a).strip():
+                terms.append((norm(a), "f", n))
     terms.sort(key=lambda t: -len(t[0]))
     found = []
     for term, kind, name in terms:
@@ -921,13 +1110,63 @@ def mentions(text, comps, flows=None):
     return comps_hit, flows_hit
 
 
+def closest_flows(question, comps, flows):
+    """이름이 하나도 안 걸린 질문에서 낱말이 가장 많이 겹치는 흐름. 같은 점수면 둘까지, 셋 이상이 같거나 겹친 말이 없으면 없음.
+    흐름마다 견주는 말: 흐름 이름·별명, 칸(구성요소·그룹) 이름, 그 구성요소의 별명·로그 문구·그룹.
+    반환: ([흐름], [겹친 말])"""
+    ws = words(question)
+    scored = []
+    for fn, f in (flows or {}).items():
+        vocab = [fn] + str_list((f or {}).get("aliases"))
+        for node in flow_nodes(f):
+            vocab.append(node)
+            for c in node_to_comps(node, comps):
+                cc = comps.get(c) or {}
+                vocab += [c, cc.get("group") or ""] + list(cc.get("aliases") or []) + list(cc.get("log_signatures") or [])
+        text = " ".join(str(v) for v in vocab).lower()
+        hit = [w for w in ws if w in text]
+        if hit:
+            scored.append((len(hit), fn, hit))
+    if not scored:
+        return [], []
+    best = max(n for n, _, _ in scored)
+    top = [x for x in scored if x[0] == best]
+    if len(top) > 2:
+        return [], []
+    return [fn for _, fn, _ in top], sorted({w for _, _, hit in top for w in hit}, key=ws.index)
+
+
+def pick_topics(topics, question, budget=TOPIC_BUDGET):
+    """주제 노트 고르기: 질문 낱말과 겹치는 것 먼저(주제 이름에 겹치면 두 배), 같으면 종류 순(판정 규칙·함정·보는 법…,
+    종류 없는 노트는 짐작한 종류로), 같으면 적힌 순. 글자 수 상한까지 넣고, 고른 것은 적힌 순서로 돌려준다.
+    반환: (고른 노트, {주제: 못 넣은 개수})"""
+    ws = words(question)
+    rank = {k: i for i, k in enumerate(KIND_RANK)}
+
+    def key(item):
+        i, n = item
+        hits = sum(2 for w in ws if w in n["component"].lower()) + sum(1 for w in ws if w in n["note"].lower())
+        return (-hits, rank.get(n.get("kind") or suggest_kind(n["note"]) or "", len(rank)), i)
+
+    chosen, more, used = [], {}, 0
+    for i, n in sorted(enumerate(topics), key=key):
+        size = len(n["component"]) + len(n["note"]) + 12
+        if used + size > budget:
+            more[n["component"]] = more.get(n["component"], 0) + 1
+            continue
+        used += size
+        chosen.append((i, n))
+    return [n for _, n in sorted(chosen, key=lambda x: x[0])], more
+
+
 def context(cluster, question, names=None, data=None, incidents=None):
     """질문(또는 사용자가 지정한 이름들)에 해당하는 지식만: 그 구성요소, 그것을 지나는 흐름, 흐름 위 구성요소,
-    관련 과거 이슈, 정상 패턴. 분석은 이것만 가지고 시작한다."""
+    관련 과거 이슈, 그 구성요소들의 노트, 그리고 클러스터 전체 주제 노트(글자 수 상한까지). 분석은 이것만 가지고 시작한다.
+    이름이 하나도 안 걸리면 낱말이 가장 많이 겹치는 흐름으로 시작한다 (guessed)."""
     data = data if data is not None else load_flows(cluster)
     incidents = incidents if incidents is not None else load_incidents(cluster)
     comps, flows = data.get("components") or {}, data.get("flows") or {}
-    notes = []
+    notes, guessed, guess_words = [], [], []
     if names:
         picked_c, picked_f, unknown = [], [], []
         by_theme = groups(comps)
@@ -943,7 +1182,9 @@ def context(cluster, question, names=None, data=None, incidents=None):
                 notes.append("'%s' 는 지식에 없다 → 분석하며 무엇인지 확인하고, 사용자 OK 후 지식에 더한다" % n)
     else:
         picked_c, picked_f = mentions(question, comps, flows)
-    hit_f = list(picked_f)
+        if not picked_c and not picked_f:
+            guessed, guess_words = closest_flows(question, comps, flows)
+    hit_f = list(picked_f or guessed)
     # 흐름 노드가 말한 구성요소이거나, 그 워크로드를 품은 구성요소(예: 게이트웨이 여럿을 묶은 것)이면 그 흐름
     picked_w = {w for n in picked_c for w in comp_workloads(comps.get(n))}
     for fn, f in flows.items():
@@ -976,25 +1217,46 @@ def context(cluster, question, names=None, data=None, incidents=None):
             known.append({"file": inc["file"], "date": str(m.get("date") or ""), "cause": m.get("cause") or "",
                           "components": ic, "logs": sig,
                           "recurrences": len([r for r in (m.get("recurrences") or []) if isinstance(r, dict)])})
-    # 정상 패턴도 구성요소 이름이나 그룹 이름 (그룹이면 그 구성요소 중 하나라도 범위에 있을 때)
-    normal = []
+    # 노트: 구성요소·그룹(이름이나 별명)에 붙은 것은 범위 안의 것만 (그룹이면 그 구성요소 중 하나라도 범위에 있을 때),
+    # 그 밖의 대상(주제: 'Nginx 로그' 등)은 클러스터 전체 노트라 늘 후보다 → pick_topics 로 글자 수 상한까지
+    normal, topics = [], []
     for n in data.get("normal") or []:
-        members = node_to_comps(n.get("component"), comps) if isinstance(n, dict) else []
-        if set(members) & set(scope):
-            normal.append(n if n.get("component") in comps else dict(n, members=members))
-    if not picked_c and not picked_f:
-        notes.append("질문에서 지식 속 구성요소·흐름을 못 찾았다 → 어느 구성요소/흐름인지 사용자에게 묻는다 "
+        n = clean_note(n)                 # 모르는 종류는 종류 없음으로 (check 가 알린다)
+        if not n:
+            continue
+        group = node_to_comps(n["component"], comps)
+        members = group or name_to_comps(n["component"], comps)
+        if not members:
+            topics.append(n)
+        elif set(members) & set(scope):
+            # 대상은 적힌 그대로 둔다 (종류를 채우는 add 는 대상·글이 같아야 한다). 그룹·별명이면 누구인지 덧붙인다
+            if n["component"] not in comps:
+                n = dict(n, members=members) if group else dict(n, alias_of=members)
+            normal.append(n)
+    topics, more = pick_topics(topics, question)
+    if more:
+        notes.append("주제 노트 %d개는 길어서 뺐다 (%s) → 필요하면 python3 koa/knowledge.py notes %s \"<주제>\" 로 읽는다" % (
+            sum(more.values()), ", ".join("%s %d" % kv for kv in more.items()), cluster))
+    if guessed:
+        notes.append("질문에서 이름을 못 찾아 낱말이 겹치는 흐름 %s 로 시작한다 (겹친 말: %s) → 첫 줄에 '%s 흐름으로 읽었어요. "
+                     "아니면 알려 주세요' 라고 쓰고 계속한다. 사용자가 다른 이름을 말하면 그 말을 별명으로 더하자고 제안" % (
+                         " · ".join(guessed), ", ".join(guess_words), " · ".join(guessed)))
+    elif not picked_c and not picked_f:
+        notes.append("질문에서 지식 속 구성요소·흐름을 못 찾았고 낱말이 겹치는 흐름도 없다 → 어느 구성요소/흐름인지 사용자에게 묻는다 "
                      "(답을 들으면 그 말을 별명으로 더하자고 제안)")
     for n in scope:
         c = comps.get(n) or {}
         if not c.get("workload") and not c.get("external"):
             notes.append("%s: 워크로드를 모른다 → 클러스터에서 찾으면 지식에 더하자고 제안" % n)
-    return {"request": question, "cluster": cluster, "asked": picked_c, "flows": flow_view, "groups": group_view,
-            "components": {n: comps.get(n) or {} for n in scope}, "incidents": known, "normal": normal, "notes": notes}
+    return {"request": question, "cluster": cluster, "asked": picked_c, "guessed": guessed, "flows": flow_view,
+            "groups": group_view, "components": {n: comps.get(n) or {} for n in scope}, "incidents": known,
+            "normal": normal, "topics": topics, "notes": notes}
 
 
 def context_text(p):
     L = ["질문: %s" % p["request"], "말한 것: %s" % (", ".join(p["asked"]) or "(없음)")]
+    if p.get("guessed"):
+        L.append("가까운 흐름으로 시작: %s (이름이 안 걸려 낱말로 골랐다)" % ", ".join(p["guessed"]))
     for fn, nodes in p["flows"].items():
         L.append("흐름 %s: %s" % (fn, nodes))
     for g, members in (p.get("groups") or {}).items():
@@ -1009,12 +1271,51 @@ def context_text(p):
         L.append("과거 이슈 %s %s — %s%s%s" % (k["date"], k["file"], k["cause"],
                                             (" (로그: %s)" % ", ".join(k["logs"])) if k["logs"] else "",
                                             (" [재발 %d회]" % k["recurrences"]) if k.get("recurrences") else ""))
+    allnotes = list(p["normal"]) + list(p.get("topics") or [])
+    if allnotes:
+        used = [k for k in NOTE_KINDS if any(n.get("kind") == k for n in allnotes)]
+        legend = ["%s=%s" % NOTE_KINDS[k] for k in used]
+        if any(not n.get("kind") for n in allnotes):
+            legend.append("%s=%s" % UNTYPED)
+        L.append("노트 읽는 법: " + " · ".join(legend))
     for n in p["normal"]:
-        L.append("정상 패턴 %s%s: %s" % (n.get("component"),
-                                       " (그룹: %s)" % ", ".join(n["members"]) if n.get("members") else "", n.get("note")))
+        who = (" (그룹: %s)" % ", ".join(n["members"]) if n.get("members") else
+               " (= %s)" % ", ".join(n["alias_of"]) if n.get("alias_of") else "")
+        L.append("노트 %s%s [%s]: %s" % (n.get("component"), who, kind_label(n.get("kind")), n.get("note")))
+    if p.get("topics"):
+        L.append("주제 노트 (클러스터 전체):")
+        for n in p["topics"]:
+            L.append("  %s [%s]: %s" % (n["component"], kind_label(n.get("kind")), n["note"]))
     for n in p["notes"]:
         L.append("참고: %s" % n)
     return "\n".join(L)
+
+
+def list_notes(cluster, find=None, untyped=False, data=None):
+    """노트 목록 (적힌 순). find: 대상이나 글에 이 말이 있는 것만 (대소문자 무시). untyped: 종류 없는 것만.
+    종류 없는 노트에는 짐작한 종류(hint_kind)를 붙인다 — 사용자에게 고르라고 보여 줄 때만 쓴다."""
+    data = data if data is not None else load_flows(cluster)
+    comps, f, out = data.get("components") or {}, str(find or "").lower().strip(), []
+    for n in data.get("normal") or []:
+        n = clean_note(n)
+        if not n or (untyped and n.get("kind")):
+            continue
+        if f and f not in n["component"].lower() and f not in n["note"].lower():
+            continue
+        n["topic"] = is_topic(n["component"], comps)
+        if not n.get("kind"):
+            n["hint_kind"] = suggest_kind(n["note"])
+        out.append(n)
+    return out
+
+
+def notes_text(items):
+    L = []
+    for n in items:
+        kind = kind_label(n.get("kind")) if n.get("kind") else (
+            "종류 없음 → 제안: %s" % kind_label(n["hint_kind"]) if n.get("hint_kind") else "종류 없음")
+        L.append("[%s] %s%s: %s" % (kind, n["component"], " (주제)" if n.get("topic") else "", n["note"]))
+    return "\n".join(L) or "(없음)"
 
 
 # ---------- CLI ----------
@@ -1039,6 +1340,10 @@ def main():
     cp.add_argument("question", nargs="?", default="")
     cp.add_argument("--with", dest="names", default=None, help="이 구성요소·흐름 이름으로 (쉼표)")
     cp.add_argument("--yaml", action="store_true")
+    np_ = sub.add_parser("notes", help="노트 목록 (주제 노트 포함)")
+    np_.add_argument("cluster")
+    np_.add_argument("find", nargs="?", default="", help="대상이나 글에 이 말이 있는 것만")
+    np_.add_argument("--untyped", action="store_true", help="종류 없는 노트만 (짐작한 종류와 함께)")
     for name in ("add", "suggest"):
         p = sub.add_parser(name)
         p.add_argument("cluster")
@@ -1077,6 +1382,8 @@ def main():
             names = [x.strip() for x in a.names.split(",") if x.strip()] if a.names else None
             p = context(a.cluster, a.question, names)
             print(yaml.safe_dump(p, allow_unicode=True, sort_keys=False) if a.yaml else context_text(p))
+        elif a.cmd == "notes":
+            print(notes_text(list_notes(a.cluster, a.find, a.untyped)))
         elif a.cmd == "add":
             r = apply_additions(a.cluster, _json_arg(a.json), apply=not a.dry_run)
             print(additions_text(r))
