@@ -110,14 +110,16 @@ class Context(unittest.TestCase):
         self.assertEqual(p["normal"], [{"component": "wrapper", "note": "배포 때 30초 502",
                                         "members": ["admin-wrapper", "user-wrapper"]}])
         self.assertEqual([k["file"] for k in p["incidents"]], ["w.md"])
-        self.assertIn("정상 패턴 wrapper (그룹: admin-wrapper, user-wrapper)", K.context_text(p))
+        self.assertIn("노트 wrapper (그룹: admin-wrapper, user-wrapper) [노트]: 배포 때 30초 502", K.context_text(p))
         # 흐름 위의 다른 구성요소(api)를 물으면: 그룹은 한 곳이라 '범위 안 두 곳' 에 걸리지 않는다
         self.assertEqual(K.context("c1", "api 가 느려", data=d, incidents=incs)["incidents"], [])
         self.assertEqual(K.context("c1", "batch 가 안 돈다", data=d, incidents=incs)["normal"],
                          [{"component": "batch", "note": "새벽에만 돈다"}])
         self.assertEqual(K.check("c1", d), [])                              # 그룹 이름은 경고하지 않는다
-        d["normal"].append({"component": "nobody", "note": "x"})
-        self.assertTrue(any("'nobody'" in m for _, m in K.check("c1", d)))
+        d["normal"].append({"component": "Nginx 로그", "note": "x"})        # 주제 노트도 경고하지 않는다
+        self.assertEqual(K.check("c1", d), [])
+        d["normal"].append({"component": "api-server", "note": "x"})        # 구성요소 이름을 잘못 쓴 것 같은 대상은 알린다
+        self.assertTrue(any("'api-server'" in m and "→ api" in m for _, m in K.check("c1", d)))
 
     def test_incident_text_finds_group(self):
         comps = {"admin-wrapper": {"group": "wrapper"}, "user-wrapper": {"group": "wrapper"}, "api": {}}
@@ -144,6 +146,170 @@ class Context(unittest.TestCase):
     def test_unknown_name_is_noted(self):
         p = ctx("", names=["billing"])
         self.assertTrue(any("billing" in n for n in p["notes"]))
+
+
+class Notes(unittest.TestCase):
+    """노트 종류 · 주제 노트 · 흐름 별명 · 이름이 안 걸린 질문 (0.2.19)."""
+
+    def data(self):
+        d = json.loads(json.dumps(DATA))
+        d["flows"]["주문-만들기"]["aliases"] = ["카드 만들기"]
+        d["normal"] += [
+            {"component": "Nginx 로그", "note": "upstream_status 가 비고 504 면 백엔드 미도달 → 앱 로그 볼 필요 없음", "kind": "rule"},
+            {"component": "Nginx 로그", "note": "upstream_status 500 이면 백엔드가 500 을 낸 것 → 컨테이너 로그로"},
+            {"component": "콘솔 nginx", "note": "로그 시각이 실제보다 +9h 오프셋 — 시각 맞출 때 보정", "kind": "pitfall"},
+            {"component": "container 로그", "note": "logs-* 인덱스를 app 라벨로 좁혀 조회", "kind": "보는 법"}]
+        return d
+
+    def test_topic_notes_reach_any_question(self):
+        p = K.context("c1", "워커가 계속 죽어", data=self.data(), incidents=[])
+        self.assertEqual([n["component"] for n in p["normal"]], ["shop-worker"])      # 구성요소 노트는 범위 안 것만
+        self.assertEqual([n["component"] for n in p["topics"]],
+                         ["Nginx 로그", "Nginx 로그", "콘솔 nginx", "container 로그"])     # 주제 노트는 늘, 적힌 순서로
+        self.assertEqual(p["topics"][3]["kind"], "howto")                             # 한글 종류 이름도 받는다
+        t = K.context_text(p)
+        self.assertIn("주제 노트 (클러스터 전체):", t)
+        self.assertIn("  Nginx 로그 [판정 규칙]: upstream_status 가 비고 504", t)
+        self.assertIn("  Nginx 로그 [노트]: upstream_status 500", t)                     # 종류 없음은 '노트'
+        self.assertIn("판정 규칙=어느 hop 탓인지 가르고", t)                             # 나온 종류만 읽는 법을 붙인다
+        self.assertNotIn("평소 수치=", t)
+
+    def test_note_on_alias_is_the_component_note(self):
+        # 별명('래빗' = mq)에 붙인 노트는 주제 노트가 아니라 그 구성요소의 노트. load_flows 는 보통 구성요소 이름으로 바꿔 두지만
+        # (migrate), 그 전의 데이터나 두 구성요소에 걸린 별명은 그대로 온다 → 대상은 적힌 그대로 두고 누구인지 덧붙인다
+        d = self.data()
+        d["normal"].append({"component": "래빗", "note": "큐 길이 1000 까지는 평소", "kind": "baseline"})
+        p = K.context("c1", "래빗 큐가 쌓여", data=d, incidents=[])
+        self.assertIn({"component": "래빗", "note": "큐 길이 1000 까지는 평소", "kind": "baseline", "alias_of": ["mq"]},
+                      p["normal"])
+        self.assertNotIn("래빗", [n["component"] for n in p["topics"]])
+        self.assertIn("노트 래빗 (= mq) [평소 수치]: 큐 길이 1000 까지는 평소", K.context_text(p))
+        self.assertNotIn("래빗", [n["component"] for n in K.context("c1", "pg 가 느려", data=d, incidents=[])["normal"]])
+        self.assertEqual([m for _, m in K.check("c1", d) if "래빗" in m], [])
+
+    def test_topic_budget_keeps_relevant_first(self):
+        d = self.data()
+        d["normal"] += [{"component": "잡담 %d" % i, "note": "가" * 300} for i in range(20)]
+        p = K.context("c1", "nginx 504 가 많아", data=d, incidents=[])
+        got = [n["component"] for n in p["topics"]]
+        self.assertIn("Nginx 로그", got)                                            # 질문과 겹치는 주제가 먼저 들어간다
+        self.assertLessEqual(sum(len(n["component"]) + len(n["note"]) + 12 for n in p["topics"]), K.TOPIC_BUDGET)
+        self.assertTrue(any("길어서 뺐다" in n and "notes c1" in n for n in p["notes"]))
+
+    def test_flow_alias_is_a_name(self):
+        p = K.context("c1", "카드 만들기가 안 끝나요", data=self.data(), incidents=[])
+        self.assertEqual(list(p["flows"]), ["주문-만들기"])
+        self.assertEqual(p["guessed"], [])
+
+    def test_closest_flow_when_no_name_matched(self):
+        d = self.data()
+        p = K.context("c1", "결제가 자꾸 실패해요", data=d, incidents=[])        # '결제' 는 pay 의 별명 '결제사' 와 겹친다
+        self.assertEqual(p["guessed"], ["주문-만들기"])
+        self.assertIn("pay", p["components"])
+        self.assertTrue(any("주문-만들기 흐름으로 읽었어요" in n for n in p["notes"]))
+        self.assertIn("가까운 흐름으로 시작: 주문-만들기", K.context_text(p))
+        q = K.context("c1", "뭔가 느려", data=d, incidents=[])                    # 겹치는 말이 없으면 묻는다
+        self.assertEqual(q["guessed"], [])
+        self.assertTrue(any("사용자에게 묻는다" in n for n in q["notes"]))
+
+    def test_suggest_kind(self):
+        self.assertEqual(K.suggest_kind("upstream_status 가 비어 있고 status=504 이면 백엔드 미도달"), "rule")
+        self.assertEqual(K.suggest_kind("logs-* 인덱스; app 라벨로 좁혀서 조회"), "howto")
+        self.assertEqual(K.suggest_kind("region 필드에 두 리전 이벤트가 공존 — 조회 시 region 으로 좁혀야 한다"), "pitfall")
+        self.assertEqual(K.suggest_kind("워커가 rabbitmq 에 AMQP 연결 — notification 발행"), "structure")
+        self.assertEqual(K.suggest_kind("매일 02:00 배치 때 큐가 쌓였다 빠진다"), "normal")
+        self.assertIsNone(K.suggest_kind("결제사 502 는 재시도 후 dead-letter"))
+
+    def test_kinds_are_checked(self):
+        d = self.data()
+        self.assertEqual(K.check("c1", d), [])
+        d["normal"].append({"component": "grafana", "note": "y", "kind": "아무거나"})
+        self.assertTrue(any("종류 '아무거나'" in m for _, m in K.check("c1", d)))
+        d["flows"]["정산"]["aliases"] = ["워커"]                                  # 구성요소 별명과 같은 흐름 별명
+        self.assertTrue(any("별명 '워커'" in m and "shop-worker" in m for _, m in K.check("c1", d)))
+
+    def test_list_notes_hints_untyped(self):
+        items = K.list_notes("c1", "nginx", untyped=True, data=self.data())
+        self.assertEqual([(n["component"], n.get("hint_kind"), n["topic"]) for n in items], [("Nginx 로그", "rule", True)])
+        self.assertIn("[종류 없음 → 제안: 판정 규칙] Nginx 로그 (주제): upstream_status 500", K.notes_text(items))
+
+
+class NoteStore(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.orig = K.KNOWLEDGE
+        K.KNOWLEDGE = Path(self.tmp.name)
+        K.save_shards("c1", {
+            "components": {"api": {"workload": "shop/Deployment/api"}, "db": {"workload": "data/StatefulSet/pg"}},
+            "flows": [{"name": "주문", "nodes": ["api", "db"], "aliases": ["주문 넣기"]}],
+            "normal": [{"component": "Nginx 로그", "note": "504 면 백엔드 미도달"},
+                       {"component": "api", "note": "배포 때 30초 502", "kind": "normal"},
+                       {"component": "api", "note": "같은 메모 두 번", "kind": "모르는 종류"},
+                       {"component": "api", "note": "같은 메모 두 번", "kind": "rule"}]})
+
+    def tearDown(self):
+        K.KNOWLEDGE = self.orig
+        self.tmp.cleanup()
+
+    def test_save_keeps_kinds_and_flow_aliases(self):
+        d = K.load_flows("c1")
+        self.assertEqual(d["flows"]["주문"]["aliases"], ["주문 넣기"])
+        self.assertEqual(d["normal"], [{"component": "Nginx 로그", "note": "504 면 백엔드 미도달"},
+                                       {"component": "api", "note": "배포 때 30초 502", "kind": "normal"},
+                                       {"component": "api", "note": "같은 메모 두 번"}])   # 모르는 종류는 빼고, 같은 글은 처음 것만
+
+    def test_add_fills_kind_but_never_overwrites(self):
+        r = K.apply_additions("c1", {"normal": [{"component": "Nginx 로그", "note": "504 면 백엔드 미도달", "kind": "판정 규칙"},
+                                                {"component": "api", "note": "배포 때 30초 502", "kind": "rule"},
+                                                {"component": "db", "note": "백업 때 느림", "kind": "baseline"},
+                                                {"component": "db", "note": "z", "kind": "엉뚱"}]})
+        self.assertEqual([x["component"] for x in r["kinded"]], ["Nginx 로그"])
+        self.assertEqual(r["normal"], [{"component": "db", "note": "백업 때 느림", "kind": "baseline"}])
+        self.assertEqual([n for n, _ in r["skipped"]], ["노트 db"])
+        text = K.additions_text(r)
+        self.assertIn("~ 노트 Nginx 로그: 종류 → 판정 규칙", text)
+        self.assertIn("+ 노트 db [평소 수치]: 백업 때 느림", text)
+        kinds = {x["note"]: x.get("kind") for x in K.load_flows("c1")["normal"]}
+        self.assertEqual(kinds["504 면 백엔드 미도달"], "rule")
+        self.assertEqual(kinds["배포 때 30초 502"], "normal")                     # 정해 둔 종류는 안 바꾼다
+        self.assertFalse(K.apply_additions("c1", {"normal": [{"component": "Nginx 로그", "note": "504 면 백엔드 미도달",
+                                                              "kind": "rule"}]})["changed"])
+
+    def test_add_alias_to_existing_flow(self):
+        r = K.apply_additions("c1", {"flows": [{"name": "주문", "aliases": ["주문 넣기", "결제 흐름"]}]})
+        self.assertEqual(r["flow_aliases"], {"주문": ["결제 흐름"]})
+        self.assertIn("~ 흐름 주문 (별명: 결제 흐름)", K.additions_text(r))
+        self.assertEqual(K.load_flows("c1")["flows"]["주문"]["aliases"], ["주문 넣기", "결제 흐름"])
+        self.assertFalse(K.apply_additions("c1", {"flows": [{"name": "주문", "aliases": ["결제 흐름"]}]})["changed"])
+        sid = K.add_suggestion("c1", "별명", {"flows": [{"name": "주문", "aliases": ["오더"]}]}, "분석")
+        sid2 = K.add_suggestion("c1", "별명", {"flows": [{"name": "주문", "aliases": ["오더2"]}]}, "분석")
+        self.assertTrue(sid and sid2 and sid != sid2)                            # 별명만 다른 제안도 따로 남는다
+
+    def test_web_save_merges_kind_set_in_chat(self):
+        meta = {}
+        d = K.load_flows("c1", meta=meta)
+        page = {"components": d["components"], "normal": [dict(x) for x in d["normal"]],
+                "flows": [{"name": n, "kind": f.get("kind"), "nodes": K.flow_nodes(f), "aliases": f.get("aliases")}
+                          for n, f in d["flows"].items()]}
+        base = {"version": meta["version"], "data": json.loads(json.dumps(page))}
+        K.apply_additions("c1", {"normal": [{"component": "Nginx 로그", "note": "504 면 백엔드 미도달", "kind": "rule"}],
+                                 "flows": [{"name": "주문", "aliases": ["오더"]}]})          # 채팅이 종류·별명을 더함
+        page["flows"][0]["kind"] = "queue"                                                # 웹에서는 흐름 종류를 고침
+        K.save_shards("c1", page, base=base)
+        d = K.load_flows("c1")
+        self.assertEqual(d["normal"][0].get("kind"), "rule")
+        self.assertEqual(d["flows"]["주문"]["aliases"], ["주문 넣기", "오더"])               # 흐름도 칸별로 합친다
+        self.assertEqual(d["flows"]["주문"]["kind"], "queue")
+        page2 = {"components": d["components"], "normal": [dict(x) for x in d["normal"]],
+                 "flows": [{"name": n, "kind": f.get("kind"), "nodes": K.flow_nodes(f)} for n, f in d["flows"].items()]}
+        meta = {}
+        K.load_flows("c1", meta=meta)
+        base = {"version": meta["version"], "data": json.loads(json.dumps(page2))}
+        K.apply_additions("c1", {"normal": [{"component": "api", "note": "같은 메모 두 번", "kind": "howto"}]})
+        page2["normal"][2]["kind"] = "pitfall"                                            # 같은 노트에 다른 종류
+        with self.assertRaises(K.Conflict) as cm:
+            K.save_shards("c1", page2, base=base)
+        self.assertEqual(cm.exception.items, ["노트 api (종류)"])
 
 
 class Store(unittest.TestCase):
@@ -297,7 +463,7 @@ class WebSave(unittest.TestCase):
         self.assertEqual(d["components"]["api"]["aliases"], ["에이피아이", "주문 API", "API"])
         self.assertEqual(set(d["components"]), {"api", "db", "web", "cache"})
         self.assertEqual(d["normal"], [{"component": "db", "note": "백업 때 느림"}, {"component": "api", "note": "고친 메모"}])
-        self.assertEqual(sorted(r["merged"]), ["구성요소 api", "구성요소 cache", "정상 패턴 db"])
+        self.assertEqual(sorted(r["merged"]), ["구성요소 api", "구성요소 cache", "노트 db"])
 
     def test_deletes_on_both_sides_survive(self):
         page, base = self.open_page()

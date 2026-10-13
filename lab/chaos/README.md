@@ -7,7 +7,7 @@ kind-lab(로컬 kind) 전용. 관리자 컨텍스트로 장애를 넣고, 두 He
 |---|---|
 | `loadgen.yaml` | `traffic/loadgen` — 6초마다 인그레스 → 링크카드 "카드 만들기" (대상은 클러스터 안 slowsite). 요청이 있어야 장애 증거가 로그에 쌓인다 |
 | `chaos.py` | 장애 주입기. `inject`(무작위/지정) · `status`(정답 숨김) · `reveal` · `recover`. 정답은 `~/.koa-chaos/answer.json`(base64, 저장소 밖) |
-| `compare.py` | 지금 걸린 장애의 질문을 `koa`·`plain` 에 동시에 `hermes -p <p> chat -q` 로 던지고 `~/.koa-chaos/runs/<시각>/summary.md` 에 비교표 |
+| `compare.py` | 지금 걸린 장애의 질문을 `koa`·`plain` 에 동시에 `hermes -p <p> chat -q` 로 던지고 `~/.koa-chaos/runs/<시각>/summary.md` 에 비교표. `--repeat N` 이면 같은 질문을 N 번씩 돌려 프로필별 중앙값(맞힘 수·시간·도구 호출·탐색·토큰)도 낸다 |
 
 ## 비교 조건 (공정성)
 
@@ -33,6 +33,19 @@ sleep 180                                            # 증거가 쌓이게
 python3 lab/chaos/compare.py                         # 두 프로필 동시 분석 → summary.md
 python3 lab/chaos/chaos.py recover
 ```
+
+개선 전후를 견줄 때는 한 판으로 판단하지 않는다. 같은 모델도 판마다 도는 길이 달라서, 한 판의 시간·토큰 차이는 운일 수 있다.
+
+```bash
+python3 lab/chaos/compare.py --repeat 3 --profiles koa   # 같은 장애를 세 번 → 프로필별 중앙값
+python3 koa/stats.py --profile koa --days 1             # 같은 실행을 Hermes 세션 기록으로 (질문별 도구 호출 순서는 --session <id>)
+python3 koa/stats.py --profile plain --all --days 1     # plain 은 knowledge.py 를 안 부르므로 --all
+```
+
+- 회차는 차례로 돌고, 한 회차 안에서 프로필끼리는 동시에 돈다. 에이전트 cwd 는 실행마다 빈 폴더(`cwd/<실행>/`)라 앞 회차의 답이 보이지 않는다.
+- 회차끼리 완전히 독립은 아니다: KOA 는 분석하다 배운 것을 `koa-learned` 스킬에 바로 적으므로 뒤 회차가 앞 회차의 교훈을 읽을 수 있다.
+  교훈 효과를 빼고 보려면 회차 사이에 `koa-learned` 를 되돌리거나, 한 판씩 날을 나눠 돌린다.
+- `탐색` 은 OpenSearch 인덱스 목록·매핑을 다시 더듬은 호출 수(`ListIndexTool`·`IndexMappingTool`)다. 지식에 보는 법이 있으면 줄어야 한다.
 
 ## 시나리오
 

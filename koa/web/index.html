@@ -168,7 +168,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 .krow.open .kedit { display: grid; }
 .kedit .full { grid-column: 1 / -1; }
 .kedit label.f { display: block; font-size: 11.5px; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
-.kedit input, .kedit select { font-size: 13px; padding: 7px 10px; border-radius: 10px; }
+.kedit input, .kedit select, .kedit textarea { font-size: 13px; padding: 7px 10px; border-radius: 10px; }
 @media (max-width: 600px) { .kedit { grid-template-columns: 1fr; } .ksum .wl { display: none; } }
 .kpick { border-radius: 16px; border: 1px solid var(--edge-soft); background: var(--glass-soft); padding: 12px 14px; margin: 8px 0 12px; max-height: 340px; overflow: auto; }
 .kpick label { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; cursor: pointer; }
@@ -273,10 +273,11 @@ details[open] > summary::before { transform: rotate(90deg); }
 
 <div id="tab-learned" hidden>
   <section class="card glass" id="kNormalCard">
-    <div class="row khdr"><h2 class="grow">정상 패턴 <span class="faint" id="nCluster"></span></h2>
+    <div class="row khdr"><h2 class="grow">노트 <span class="faint" id="nCluster"></span></h2>
       <span class="faint" id="nSaveState"></span>
-      <button class="btn" data-n="addNormal">＋ 정상 패턴</button><button class="btn primary" id="nSave">저장</button></div>
-    <p class="hint">이 클러스터에서 정상인데 이상해 보이는 것입니다. 분석은 해당 구성요소를 볼 때만 이걸 참고해서 "원인이 아니다" 를 거릅니다. 구성요소 칸에 그룹 이름을 쓰면 그 그룹의 구성요소 모두에 해당합니다. 분석이 끝나면 KOA 가 새로 본 패턴을 더할지 묻고, OK 하면 여기에 쌓입니다. 클러스터 지식(flows.yaml)에 저장됩니다.</p>
+      <button class="btn ghost" data-n="suggestKinds" title="종류 없는 노트에 글을 보고 짐작한 종류를 채웁니다 (저장 전에 고칠 수 있음)">종류 제안</button>
+      <button class="btn" data-n="addNormal">＋ 노트</button><button class="btn primary" id="nSave">저장</button></div>
+    <p class="hint">KOA 가 이 클러스터를 분석할 때 참고하는 메모입니다. 대상에 구성요소·그룹 이름을 쓰면 그것을 볼 때만, 그 밖의 말(예: "Nginx 로그")을 쓰면 <b>주제 노트</b>로 모든 분석에 같이 갑니다. 종류를 정해 두면 분석이 노트를 알맞게 씁니다: <b>판정 규칙</b> 어느 hop 탓인지 가른다 · <b>보는 법</b> 이대로 조회한다 · <b>함정</b> 데이터를 보정한다 · <b>평소 수치</b> 지금 값과 견준다 · <b>구조</b> 흐름을 읽을 때 쓴다 · <b>정상 패턴</b> 같으면 원인이 아니다. 종류가 없으면 내용대로 씁니다. 분석이 끝나면 KOA 가 새로 본 것을 더할지 묻고, OK 하면 여기에 쌓입니다. 클러스터 지식(flows.yaml)에 저장됩니다.</p>
     <div class="row" id="nBar" style="gap:10px;margin-bottom:10px"><div class="seg sm grow" id="nTabs"></div>
       <input id="nFind" placeholder="찾기" style="max-width:200px"></div>
     <div id="kNormal" class="klist"></div>
@@ -360,7 +361,7 @@ async function setCluster(c) {
 }
 
 // ---------- 클러스터 지식 ----------
-// 상태: SH = { components: {이름: {...}}, flows: [{name, kind, nodes:[]}], normal: [{component, note}] }
+// 상태: SH = { components: {이름: {...}}, flows: [{name, kind, nodes:[], aliases:[]}], normal: [{component, note, kind}] }
 let SH = { components: {}, flows: [], normal: [] };
 // 화면을 그릴 때 읽은 지식의 버전과 그때 모습. 저장할 때 같이 보내면, 그사이 KOA 채팅 등에서 바뀐 것을 서버가 지우지 않고 합친다
 let SH0 = null;
@@ -368,14 +369,20 @@ const KIND_OPT = { "": "— (알아서)", app: "앱", "message-queue": "큐", ca
 const KIND_LABEL = { "message-queue": "큐", cache: "캐시", database: "DB", ingress: "Ingress", gateway: "게이트웨이", app: "앱" };
 const QRE = /rabbit|rmq|kafka|queue|큐|sqs|nats/i;
 const csvs = v => v.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+// 노트 종류 (서버 knowledge.NOTE_KINDS 를 받는다. 못 받으면 이것)
+let NOTE_KINDS = [["rule", "판정 규칙", "어느 hop 탓인지 가르고 다음에 볼 곳을 정한다"], ["howto", "보는 법", "이대로 조회한다"],
+  ["pitfall", "함정", "데이터를 읽을 때 보정한다"], ["baseline", "평소 수치", "지금 값과 견준다"], ["structure", "구조", "흐름·구성요소를 읽을 때 쓴다"],
+  ["normal", "정상 패턴", "같으면 원인이 아니다"]];
+const kindName = k => (NOTE_KINDS.find(x => x[0] === k) || [])[1] || "";
 
 function flowsToNodes(flows) {
-  return Object.entries(flows || {}).map(([name, f]) => ({ name, kind: f.kind || ((f.nodes || []).some(n => QRE.test(n)) ? "queue" : "http"), nodes: f.nodes || [] }));
+  return Object.entries(flows || {}).map(([name, f]) => ({ name, kind: f.kind || ((f.nodes || []).some(n => QRE.test(n)) ? "queue" : "http"), nodes: f.nodes || [], aliases: f.aliases || [] }));
 }
 function renderKnowledge() {
   const k = S.k;
   $("#nCluster").textContent = k ? "· " + (k.cluster || S.cluster) : "";
-  if (!k) { SH0 = null; $("#kNormal").innerHTML = '<div class="kempty">클러스터를 고르면 그 클러스터의 정상 패턴이 보입니다.</div>'; return; }
+  if (!k) { SH0 = null; $("#kNormal").innerHTML = '<div class="kempty">클러스터를 고르면 그 클러스터의 노트가 보입니다.</div>'; return; }
+  if ((k.note_kinds || []).length) NOTE_KINDS = k.note_kinds;
   $("#kTitle").textContent = (k.cluster || S.cluster) + " 지식";
   $("#kpath").textContent = "저장 위치: " + k.path;
   SH = {
@@ -476,7 +483,7 @@ function renderChecks(list) {
 }
 function renderStats() {
   const nc = Object.keys(SH.components).length, chk = (S.checks || []).length;
-  $("#kStats").innerHTML = `<span class="chip">구성요소 ${nc}</span><span class="chip">흐름 ${SH.flows.length}</span><span class="chip click" id="kNormChip" title="'KOA 가 배운 것' 에서 봅니다">정상 패턴 ${SH.normal.length} ↗</span>`
+  $("#kStats").innerHTML = `<span class="chip">구성요소 ${nc}</span><span class="chip">흐름 ${SH.flows.length}</span><span class="chip click" id="kNormChip" title="'KOA 가 배운 것' 에서 봅니다">노트 ${SH.normal.length} ↗</span>`
     + (chk ? `<span class="chip warn click" id="kChkChip" title="눌러서 보기">확인할 것 ${chk} ▾</span>` : '<span class="chip ok">문제 없음</span>');
   $("#kNormChip").onclick = () => showTab("learned");
   const cc = $("#kChkChip"); if (cc) cc.onclick = () => { $("#kChecks").hidden = !$("#kChecks").hidden; };
@@ -532,10 +539,14 @@ const isOpen = id => SH.open === id;
 function rowHTML(id, sum, edit) {
   return `<div class="krow ${isOpen(id) ? "open" : ""}" data-id="${esc(id)}"><div class="ksum">${sum}<button class="x" data-del="${esc(id)}" title="삭제">×</button></div><div class="kedit">${edit}</div></div>`;
 }
-function flowSum(fl) { return `<div class="chain grow">${chainHTML(fl)}</div><span class="chip">${fl.kind === "queue" ? "큐" : "http"}</span>`; }
+function flowSum(fl) {
+  const al = fl.aliases || [], tail = al.slice(0, 2).map(a => `<span class="chip" title="질문에서 이 흐름을 부르는 말">${esc(a)}</span>`).join("") + (al.length > 2 ? `<span class="chip">+${al.length - 2}</span>` : "");
+  return `<div class="chain grow">${chainHTML(fl)}</div>${tail}<span class="chip">${fl.kind === "queue" ? "큐" : "http"}</span>`;
+}
 function renderFlows() {
   $("#kFlows").innerHTML = SH.flows.map((fl, i) => rowHTML("f" + i, flowSum(fl), `
       <div class="full"><label class="f">경로 (→ 로 구분)</label><input data-k="f" data-i="${i}" data-f="nodes" value="${esc(fl.nodes.join(" → "))}"></div>
+      <div class="full"><label class="f">별명 (질문에서 이 흐름을 부르는 말, 쉼표 · 예: 카드 만들기)</label><input data-k="f" data-i="${i}" data-f="aliases" value="${esc((fl.aliases || []).join(", "))}"></div>
       <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="f" data-i="${i}" data-f="kind" ${fl.kind === "queue" ? "checked" : ""}> 큐를 지나는 흐름 (넣기·꺼내기)</label>`)).join("")
     || '<div class="kempty">아직 없습니다. ＋ 흐름으로 "사용자 → gateway → order-api" 처럼 적어 보세요.</div>';
 }
@@ -569,7 +580,7 @@ function compRow([n, c]) {
       <div class="full"><label class="f">문제일 때 찍히는 로그 문구</label><input data-k="c" data-n="${esc(n)}" data-f="log" value="${esc((c.log_signatures || []).join(", "))}" placeholder="Too many connections"></div>
       <label class="row faint full" style="gap:6px"><input type="checkbox" data-k="c" data-n="${esc(n)}" data-f="external" ${c.external ? "checked" : ""}> 클러스터 밖 (RDS·외부 API 등)</label>`);
 }
-// 정상 패턴: 구성요소의 그룹(없으면 구성요소 이름)별 탭 + 찾기. 새로 연 줄은 탭과 관계없이 보인다
+// 노트: 구성요소의 그룹(없으면 구성요소 이름, 주제 노트는 주제)별 탭 + 찾기. 새로 연 줄은 탭과 관계없이 보인다
 let nTab = "", nFind = "";
 const normalKey = x => (x.component && SH.components[x.component] && (SH.components[x.component].group || "").trim()) || (x.component || "").trim();
 function renderNormal() {
@@ -585,19 +596,25 @@ function renderNormal() {
     const x = SH.normal[i];
     if (SH.open === "n" + i) return true;
     if (byKey !== null && normalKey(x) !== byKey) return false;
-    return !q || ((x.component || "") + " " + (x.note || "")).toLowerCase().includes(q);
+    return !q || ((x.component || "") + " " + (x.note || "") + " " + kindName(x.kind)).toLowerCase().includes(q);
   }).sort((a, b) => (SH.normal[a].component || "\uffff").localeCompare(SH.normal[b].component || "\uffff", "ko") || a - b);
   $("#kNormal").innerHTML = idx.map(i => [SH.normal[i], i]).map(([x, i]) => rowHTML("n" + i, normalSum(x), `
-      <div><label class="f">구성요소 또는 그룹</label><input data-k="n" data-i="${i}" data-f="component" list="compNames" value="${esc(x.component || "")}"></div>
-      <div><label class="f">정상 동작</label><input data-k="n" data-i="${i}" data-f="note" value="${esc(x.note || "")}" placeholder="매일 02:00 배치 때 큐가 쌓였다 빠진다"></div>`)).join("")
-    || `<div class="kempty">${SH.normal.length ? "맞는 정상 패턴이 없습니다" : "없음"}</div>`;
+      <div><label class="f">대상 (구성요소·그룹, 또는 주제)</label><input data-k="n" data-i="${i}" data-f="component" list="compNames" value="${esc(x.component || "")}" placeholder="order-worker 또는 Nginx 로그"></div>
+      <div><label class="f">종류</label><select data-k="n" data-i="${i}" data-f="kind"><option value="">— 종류 없음 (내용대로)</option>${NOTE_KINDS.map(([v, l, u]) => `<option value="${v}" ${x.kind === v ? "selected" : ""} title="${esc(u)}">${esc(l)} · ${esc(u)}</option>`).join("")}</select></div>
+      <div class="full"><label class="f">내용</label><textarea data-k="n" data-i="${i}" data-f="note" rows="2" placeholder="upstream_status 가 비고 504 면 백엔드 미도달 → 앱 로그는 볼 필요 없음">${esc(x.note || "")}</textarea></div>`)).join("")
+    || `<div class="kempty">${SH.normal.length ? "맞는 노트가 없습니다" : "없음"}</div>`;
   const gs = [...new Set(Object.values(SH.components).map(c => (c.group || "").trim()).filter(g => g && !SH.components[g]))].sort((a, b) => a.localeCompare(b, "ko"));
   $("#compNames").innerHTML = gs.map(g => `<option value="${esc(g)}" label="그룹">`).concat(Object.keys(SH.components).map(n => `<option value="${esc(n)}">`)).join("");
 }
-// 정상 패턴 한 줄: 그룹 이름이면 '그룹 ×n' (분석은 그 그룹의 구성요소 모두에 이 패턴을 쓴다)
+// 노트 한 줄: 그룹 이름이면 '그룹 ×n' (분석은 그 그룹의 구성요소 모두에 쓴다), 구성요소·그룹이 아니면 '주제' (모든 분석에 같이 간다)
+const isTopic = t => { const l = (t || "").trim().toLowerCase();   // knowledge.is_topic 과 같은 규칙: 이름·별명은 대소문자 무시
+  return !!l && !known(t) && !Object.entries(SH.components).some(([n, c]) => [n].concat(c.aliases || []).some(a => String(a).trim().toLowerCase() === l)); };
 function normalSum(x) {
   const m = x.component && !SH.components[x.component] ? groupOf(x.component) : [];
-  return `<div class="grow" style="font-size:13px"><b>${esc(x.component || "대상?")}</b>${m.length ? ` <span class="chip accent" title="${esc("그룹: " + m.join(", "))}">그룹 ×${m.length}</span>` : ""} <span class="muted">${esc(x.note || "")}</span></div>`;
+  const tag = m.length ? ` <span class="chip accent" title="${esc("그룹: " + m.join(", "))}">그룹 ×${m.length}</span>`
+    : isTopic(x.component) ? ' <span class="chip" title="구성요소·그룹이 아닌 대상: 모든 분석에 같이 갑니다">주제</span>' : "";
+  const kind = x.kind ? ` <span class="chip accent">${esc(kindName(x.kind))}</span>` : ' <span class="chip faint" title="종류 없음 — \'종류 제안\' 으로 채울 수 있습니다">종류?</span>';
+  return `<div class="grow" style="font-size:13px"><b>${esc(x.component || "대상?")}</b>${tag}${kind} <span class="muted">${esc(x.note || "")}</span></div>`;
 }
 function markDirty() { S.dirty = true; $("#saveState").innerHTML = $("#nSaveState").innerHTML = '<span class="dot"></span>저장 안 됨' + (S.stale ? " · 그사이 다른 곳에서도 바뀜 (저장하면 합칩니다)" : ""); }
 function refreshSum(row) {
@@ -633,7 +650,8 @@ const onKnowledgeClick = e => {
     const a = add.dataset.n;
     if (a === "addFlow") { SH.flows.push({ name: "flow-" + (SH.flows.length + 1), kind: "http", nodes: [] }); SH.open = "f" + (SH.flows.length - 1); }
     else if (a === "addComp") { let b = "새-구성요소", i = 1; while (SH.components[b]) b = "새-구성요소-" + (++i); SH.components[b] = {}; SH.open = "c:" + b; }
-    else if (a === "addNormal") { SH.normal.push({ component: known(nTab) ? nTab : "", note: "" }); SH.open = "n" + (SH.normal.length - 1); }
+    else if (a === "addNormal") { SH.normal.push({ component: nTab || "", note: "", kind: "" }); SH.open = "n" + (SH.normal.length - 1); }
+    else if (a === "suggestKinds") { suggestKinds(); return; }
     markDirty(); renderAll();
     const first = $(`.krow[data-id="${CSS.escape(SH.open)}"] .kedit input`); if (first) first.focus();
   }
@@ -653,6 +671,7 @@ const onKnowledgeInput = e => {
   } else if (k === "f") {
     const fl = SH.flows[+t.dataset.i];
     if (f === "nodes") { fl.nodes = t.value.split(/->|→|=>|>/).map(s => s.trim()).filter(Boolean); if (fl.nodes.some(n => QRE.test(n)) && fl.kind !== "queue") { fl.kind = "queue"; const cb = t.closest(".kedit").querySelector("[data-f=kind]"); if (cb) cb.checked = true; } }
+    else if (f === "aliases") fl.aliases = csvs(t.value);
     else fl.kind = t.checked ? "queue" : "http";
   } else if (k === "n") SH.normal[+t.dataset.i][f] = t.value;
   markDirty(); refreshSum(t.closest(".krow")); renderStats();
@@ -676,6 +695,18 @@ $("#tab-knowledge").addEventListener("change", e => {
   SH.normal.forEach(x => { if (x.component === old) x.component = nn; });
   SH.open = "c:" + nn; markDirty(); renderAll();
 });
+// 종류 제안: 종류 없는 노트의 글을 서버(knowledge.suggest_kind)에 보내 짐작한 종류를 채운다. 저장 전이라 고칠 수 있다
+async function suggestKinds() {
+  const todo = SH.normal.map((x, i) => [x, i]).filter(([x]) => !x.kind && (x.note || "").trim());
+  if (!todo.length) { toast("종류 없는 노트가 없습니다"); return; }
+  let j;
+  try { j = await api(kpath() + "/note_kinds", { notes: todo.map(([x]) => x.note) }); } catch (e) { toast(e.message, 4000); return; }
+  let n = 0;
+  todo.forEach(([x], k) => { const v = (j.kinds || [])[k]; if (v) { x.kind = v; n++; } });
+  if (!n) { toast("글에서 종류를 짐작할 단서를 못 찾았습니다. 직접 골라 주세요", 4000); return; }
+  markDirty(); renderNormal(); renderStats();
+  toast(`${n}개에 종류를 채웠습니다${todo.length > n ? ` (${todo.length - n}개는 단서가 없어 그대로)` : ""}. 확인하고 저장하세요`, 5000);
+}
 async function saveShards() {
   SH.flows = SH.flows.filter(fl => fl.nodes.length >= 2);
   const payload = { components: SH.components, flows: SH.flows, normal: SH.normal.filter(x => x.component && x.note),
@@ -839,7 +870,7 @@ async function checkFresh() {
     if (S.cluster && S.k && SH0) {
       const j = await api(kpath() + "/stamp");
       // 칸에 커서가 있으면 지금 다시 그리지 않는다 (쓰려던 칸이 사라지지 않게) — 다음에 다시 볼 때 읽는다
-      const typing = document.activeElement && document.activeElement.matches("#tab-knowledge input, #kNormalCard input");
+      const typing = document.activeElement && document.activeElement.matches("#tab-knowledge input, #kNormalCard input, #kNormalCard textarea, #kNormalCard select");
       if (j.stamp !== SH0.stamp) {
         if (!S.dirty && !typing) await reloadKnowledge();
         else if (S.dirty && !S.stale) { S.stale = true; markDirty(); }

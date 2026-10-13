@@ -139,8 +139,11 @@ def get_knowledge(c):
     return {
         "cluster": c,
         "understood": {"components": data["components"],
-                       "flows": {n: {"kind": f.get("kind"), "nodes": K.flow_nodes(f)} for n, f in data["flows"].items()},
-                       "normal": data["normal"]},
+                       "flows": {n: {"kind": f.get("kind"), "nodes": K.flow_nodes(f), "aliases": K.str_list(f.get("aliases"), drop=n)}
+                                 for n, f in data["flows"].items()},
+                       # 화면은 정리된 노트로 (종류 이름으로 적힌 것도 키로, 모르는 종류는 빈 칸 — check 가 알린다)
+                       "normal": [x for x in (K.clean_note(n) for n in data["normal"]) if x]},
+        "note_kinds": [[k, label, use] for k, (label, use) in K.NOTE_KINDS.items()],
         "incidents": incs,
         "suggestions": K.list_suggestions(c),
         "check": checks(K.check(c, data)),
@@ -326,6 +329,10 @@ class Handler(BaseHTTPRequestHandler):
                     with _lock:
                         added, chk = K.add_discovered_components(c, body.get("workloads") or [])
                     return self._send(200, {"added": added, "check": checks(chk)})
+                if method == "POST" and p[2:] == ["note_kinds"]:
+                    # 웹 '종류 제안': 노트 글마다 짐작한 종류 (없으면 null). 파일은 안 건드린다
+                    notes = body.get("notes") if isinstance(body.get("notes"), list) else []
+                    return self._send(200, {"kinds": [K.suggest_kind(str(x)) for x in notes[:2000]]})
                 if method == "POST" and p[2:] == ["shards"]:
                     base = body.get("base")
                     if base is not None and not isinstance(base, dict):

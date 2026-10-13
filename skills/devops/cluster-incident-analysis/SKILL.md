@@ -1,7 +1,7 @@
 ---
 name: cluster-incident-analysis
 description: "Use when analyzing a K8s problem the user names in KOA."
-version: 2.1.0
+version: 2.2.0
 author: KOA
 license: MIT
 metadata:
@@ -19,7 +19,7 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
 ## When to Use
 
 - The user names a component or flow and a symptom ("rmq 소비가 안 돼", "카드 만들기 흐름이 느려") and wants the cause.
-- The user asks to record/correct what KOA knows about a cluster (components, flows, normal patterns, incidents).
+- The user asks to record/correct what KOA knows about a cluster (components, flows, notes, incidents).
 
 ## Always-on rules
 
@@ -49,10 +49,28 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    (`--with a,b` when the user named things explicitly or corrected you). Show its first lines (asked
    components, flows) and the time window you will use at the top of your first reply so the user can correct
    the reading.
-   - Nothing matched → ask which component/flow they mean (offer the knowledge's component names). Their
-     answer is a new alias: include it in the proposal at the end.
+   - No name matched → the slice starts with the closest flow by shared words (`가까운 흐름으로 시작: …`). Write
+     "<흐름> 흐름으로 읽었어요. 아니면 알려 주세요" on your first line and keep going. Ask which component/flow
+     they mean (offer the knowledge's names) only when the slice says nothing is close (`사용자에게 묻는다`).
+     A correction is a new alias (of a component or a flow): include it in the proposal at the end.
    - A name the knowledge doesn't have → find just that workload read-only (`kubectl get deploy,sts,ds -A
      | grep <name>`), analyze it, and propose adding it.
+   - **Read the notes before touching the cluster.** `노트 …` lines belong to components in the slice;
+     `주제 노트` hold for the whole cluster (how to read a log, an index's quirks). Use each by its kind
+     (`노트 읽는 법` in the slice says the same):
+
+     | kind | use |
+     |---|---|
+     | 판정 규칙 | decides which hop is at fault and where to look next — follow it instead of checking every hop |
+     | 보는 법 | query exactly this way first; list indices or read mappings only if the recipe fails |
+     | 함정 | correct the data before comparing (clock offsets, mixed regions, double records) |
+     | 평소 수치 | compare the current value with it (note the date it was measured) |
+     | 구조 | how the flow really runs (who calls/publishes what) |
+     | 정상 패턴 | a match means "not the cause" — say so |
+     | 노트 (종류 없음) | use it by what it says; it may be any of the above, not only "not the cause" |
+
+     If the slice says `주제 노트 N개는 길어서 뺐다`, read a topic when the work reaches it:
+     `python3 koa/knowledge.py notes <c> "<주제>"`.
 3. **Past incidents first**: for each `과거 이슈` in the slice, grep its log lines in the named components
    over the window (`kubectl logs --since-time=<window start, RFC3339> ... | grep -c "<line>"`; the MCP
    `kubectl_logs` takes `since` as a duration, so pass one that reaches back to the window start). A hit is the
@@ -60,9 +78,9 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
 4. **Walk the flow hop by hop** over the components in the slice, in flow order (for a queue backlog start
    at the consumer, then broker, then the consumer's downstream, then the producer). Per hop: pods
    (ready/restarts/lastState), events for those pods in the window, logs (the window, `tail`, the component's
-   `로그` lines), and the call to the next hop. Judge each against its `정상 패턴` before calling it
-   abnormal — a matching normal pattern means "not the cause", say so. A pattern on a group (`정상 패턴 wrapper
-   (그룹: …)`) holds for each member.
+   `로그` lines), and the call to the next hop. Judge each against its notes before calling it abnormal (a
+   `판정 규칙` may settle the hop at once; a matching `정상 패턴` means "not the cause", say so). A note on a
+   group (`노트 wrapper (그룹: …)`) holds for each member.
    The cause point is where the flow turns from normal to abnormal.
 5. **Hypotheses**: 2–3 with evidence for/against; share the early read, then confirm.
 6. **Report**: conclusion + confidence, the time window you looked at, evidence table (hop · what was checked ·
@@ -72,20 +90,29 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
 
    | 종류 | 내용 | 근거 |
    |---|---|---|
-   | 구성요소 / 별명 / 로그 문구 / 흐름 / 정상 패턴 / 과거 이슈 | … | 어디서 봤는지 |
+   | 구성요소 / 별명 / 로그 문구 / 흐름 / 흐름 별명 / 노트 (종류) / 노트 종류 / 과거 이슈 | … | 어디서 봤는지 |
 
    Ask "이대로 지식에 더할까요?" After OK, write exactly the approved rows:
    ```bash
    python3 koa/knowledge.py add <c> '{"components": {"rabbitmq": {"aliases": ["래빗"], "log_signatures": ["disk resource limit alarm set"]}},
                                      "flows": [{"name": "카드-만들기", "nodes": ["linkcard-web", "rabbitmq", "linkcard-worker"]}],
-                                     "normal": [{"component": "linkcard-worker", "note": "…"}]}'
+                                     "normal": [{"component": "linkcard-worker", "note": "…", "kind": "normal"},
+                                                {"component": "Nginx 로그", "note": "upstream_status 가 비고 504 면 백엔드 미도달", "kind": "rule"}]}'
+   python3 koa/knowledge.py add <c> '{"flows": [{"name": "카드-만들기", "aliases": ["카드 만들기"]}]}'   # 기존 흐름에 부르는 말
    python3 koa/knowledge.py incident <c> '{"date": "2026-10-11", "components": ["rabbitmq"], "logs": ["…"], "cause": "…", "found_by": "…", "body": "한 문단"}'
    ```
    **Same cause as a past incident in the slice → don't propose a new incident.** Propose "재발" instead and,
    after OK, append it to that file: `python3 koa/knowledge.py recur <c> <incident-file> '{"date": "…", "note":
    "한 줄", "logs": ["새로 본 문구"]}'`. A new incident is only for a cause not already recorded.
-   A normal pattern or incident that holds for a whole group (every wrapper console) names the group, like a flow
+   A note or incident that holds for a whole group (every wrapper console) names the group, like a flow
    node: `{"component": "wrapper", …}`, `"components": ["wrapper"]`.
+   **Every new note gets a kind**: `rule` (판정 규칙) · `howto` (보는 법) · `pitfall` (함정) · `baseline` (평소 수치,
+   with the date measured) · `structure` (구조) · `normal` (정상 패턴). A note about a topic rather than one
+   component (how to read the Nginx access log, an index's fields) names the topic as `component`, e.g.
+   `"Nginx 로그"`: it goes with every analysis of the cluster, so keep it to one or two lines. Untyped notes you
+   used in this analysis → propose their kind in the same table (`knowledge.py notes <c> --untyped` shows a
+   guess); after OK, `add` the same component + note with `"kind"` — it fills an empty kind and never changes one
+   already set. The user words a flow by another name ("카드 만들기") → propose it as a flow alias.
    `add` only adds (merges list fields, fills empty fields, skips flows already known); show its output.
    **Never edit `flows.yaml` by hand.** A flow is one straight chain; a side call (web also writes to redis) is its
    own flow, e.g. `{"name": "카드-접수-저장", "nodes": ["linkcard-web", "redis"]}`. If `add` skips it as "already
@@ -106,7 +133,7 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    it is missing). Don't patch this skill for that: it is shipped and a profile update overwrites it. A stable
    user/environment fact → memory, as one short Korean sentence (keep tool and cluster identifiers as they are).
    Never put cluster names/flows there. The web UI tab "KOA 가 배운 것" shows `koa-learned` (and the cluster's
-   normal patterns); it does not show memory — that stays with Hermes' own memory tools.
+   notes); it does not show memory — that stays with Hermes' own memory tools.
    Lessons that proved general can later be promoted into this skill in the repo.
    **Never create a new skill without asking.** If something deserves its own skill instead of a lesson line,
    describe it in two or three lines (name, when it loads, what it says) and create it only after the user's OK.

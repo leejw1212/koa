@@ -50,7 +50,13 @@ KOA ships as a Hermes profile distribution. Two copies exist:
 - **Knowledge changes only through the user.** Tools never edit `local/knowledge/<c>/flows.yaml` on their
   own: they call `knowledge.add_suggestion` / `suggest_from_flowmap`, and the user accepts in the web UI
   or tells the agent to `knowledge.py add`. `apply_additions` only adds (merges list fields, fills empty
-  fields, skips flows already inside a known flow) — never deletes or overwrites.
+  fields, skips flows already inside a known flow, adds aliases to a flow named with no nodes, fills an
+  empty note `kind`) — never deletes or overwrites.
+- **Notes carry a kind; topic notes are cluster-wide.** `normal` items are notes `{component, note, kind}`
+  (kinds in `knowledge.NOTE_KINDS`). A `component` that is not a component/group name or alias is a topic
+  note: `context` always offers it (relevance first, `TOPIC_BUDGET` chars). Keep that budget when adding
+  note sources, and measure with `koa/stats.py` (real sessions) or `lab/chaos/compare.py --repeat` (lab)
+  before claiming an analysis got faster or cheaper.
 
 ## Syncing the installed profile from the remote
 
