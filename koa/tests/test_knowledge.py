@@ -3,6 +3,7 @@
 
   python3 koa/tests/test_knowledge.py
 """
+import json
 import sys
 import tempfile
 import unittest
@@ -95,6 +96,33 @@ class Context(unittest.TestCase):
         d["components"]["manager-console-wrapper"] = d["components"].pop("manager-wrapper")
         self.assertEqual(K.context("c1", "manager console wrapper 에서 502", data=d, incidents=[])["asked"],
                          ["manager-console-wrapper"])
+
+    def test_normal_and_incident_on_group(self):
+        # 정상 패턴·과거 이슈의 구성요소 칸에 그룹 이름 → 그 그룹의 구성요소 중 하나라도 범위에 있으면 꺼낸다
+        d = {"components": {"edge": {"workload": "e/Deployment/edge"},
+                            "admin-wrapper": {"workload": "c/Deployment/admin", "group": "wrapper"},
+                            "user-wrapper": {"workload": "c/Deployment/user", "group": "wrapper"},
+                            "api": {"workload": "a/Deployment/api"}, "batch": {"workload": "b/CronJob/batch"}},
+             "flows": {"f": {"hops": ["edge", "wrapper", "api"]}},
+             "normal": [{"component": "wrapper", "note": "배포 때 30초 502"}, {"component": "batch", "note": "새벽에만 돈다"}]}
+        incs = [{"file": "w.md", "meta": {"components": ["wrapper"], "cause": "wrapper 전체 OOM"}, "body": ""}]
+        p = K.context("c1", "admin-wrapper 가 502 를 낸다", data=d, incidents=incs)
+        self.assertEqual(p["normal"], [{"component": "wrapper", "note": "배포 때 30초 502",
+                                        "members": ["admin-wrapper", "user-wrapper"]}])
+        self.assertEqual([k["file"] for k in p["incidents"]], ["w.md"])
+        self.assertIn("정상 패턴 wrapper (그룹: admin-wrapper, user-wrapper)", K.context_text(p))
+        # 흐름 위의 다른 구성요소(api)를 물으면: 그룹은 한 곳이라 '범위 안 두 곳' 에 걸리지 않는다
+        self.assertEqual(K.context("c1", "api 가 느려", data=d, incidents=incs)["incidents"], [])
+        self.assertEqual(K.context("c1", "batch 가 안 돈다", data=d, incidents=incs)["normal"],
+                         [{"component": "batch", "note": "새벽에만 돈다"}])
+        self.assertEqual(K.check("c1", d), [])                              # 그룹 이름은 경고하지 않는다
+        d["normal"].append({"component": "nobody", "note": "x"})
+        self.assertTrue(any("'nobody'" in m for _, m in K.check("c1", d)))
+
+    def test_incident_text_finds_group(self):
+        comps = {"admin-wrapper": {"group": "wrapper"}, "user-wrapper": {"group": "wrapper"}, "api": {}}
+        self.assertEqual(K.incident_meta("2026-10-01 wrapper 전체가 502. 원인: 노드 장애", comps)["components"], ["wrapper"])
+        self.assertEqual(K.incident_meta("admin-wrapper 만 502", comps)["components"], ["admin-wrapper"])
 
     def test_explicit_name_by_alias(self):
         self.assertEqual(ctx("", names=["결제사"])["asked"], ["pay"])
@@ -229,6 +257,82 @@ class Store(unittest.TestCase):
         data = {"components": {n: {"workload": "ns/Deployment/%s" % n} for n in ("a", "b", "q", "w", "cache")},
                 "flows": {"f": f}, "normal": []}
         self.assertTrue(any("갈래" in m for _, m in K.check("c1", data)))
+
+
+class WebSave(unittest.TestCase):
+    """웹 화면은 연 때의 상태 전체를 저장한다. 그사이 KOA 채팅이 더한 것을 지우면 안 된다 (base 로 합친다)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.orig = K.KNOWLEDGE
+        K.KNOWLEDGE = Path(self.tmp.name)
+        K.save_shards("c1", {
+            "components": {"api": {"workload": "shop/Deployment/api", "aliases": ["에이피아이"]},
+                           "db": {"workload": "data/StatefulSet/pg", "kind": "database"}},
+            "flows": [{"name": "주문", "nodes": ["api", "db"]}],
+            "normal": [{"component": "api", "note": "사람이 쓴 메모"}]})
+
+    def tearDown(self):
+        K.KNOWLEDGE = self.orig
+        self.tmp.cleanup()
+
+    def open_page(self):
+        """웹이 화면을 열 때처럼: 읽은 버전 + 화면 상태 (흐름은 목록)."""
+        meta = {}
+        d = K.load_flows("c1", meta=meta)
+        state = {"components": json.loads(json.dumps(d["components"])),
+                 "flows": [{"name": n, "kind": f.get("kind"), "nodes": K.flow_nodes(f)} for n, f in d["flows"].items()],
+                 "normal": [dict(x) for x in d["normal"]]}
+        return state, {"version": meta["version"], "data": json.loads(json.dumps(state))}
+
+    def test_save_keeps_what_chat_added_meanwhile(self):
+        page, base = self.open_page()
+        K.apply_additions("c1", {"components": {"api": {"aliases": ["주문 API"]}, "cache": {"workload": "shop/StatefulSet/cache"}},
+                                 "normal": [{"component": "db", "note": "백업 때 느림"}]})       # 채팅이 더함
+        page["components"]["api"]["aliases"].append("API")                                    # 웹에서 고친 것
+        page["components"]["web"] = {"workload": "shop/Deployment/web"}
+        page["normal"][0]["note"] = "고친 메모"
+        r = K.save_shards("c1", page, base=base)
+        d = K.load_flows("c1")
+        self.assertEqual(d["components"]["api"]["aliases"], ["에이피아이", "주문 API", "API"])
+        self.assertEqual(set(d["components"]), {"api", "db", "web", "cache"})
+        self.assertEqual(d["normal"], [{"component": "db", "note": "백업 때 느림"}, {"component": "api", "note": "고친 메모"}])
+        self.assertEqual(sorted(r["merged"]), ["구성요소 api", "구성요소 cache", "정상 패턴 db"])
+
+    def test_deletes_on_both_sides_survive(self):
+        page, base = self.open_page()
+        K.save_shards("c1", dict(page, flows=[]))                     # 다른 창에서 흐름을 지웠다
+        del page["components"]["db"]                                  # 이 창에서는 db 를 지웠다
+        K.save_shards("c1", page, base=base)
+        d = K.load_flows("c1")
+        self.assertEqual((set(d["components"]), d["flows"]), ({"api"}, {}))
+
+    def test_same_field_both_sides_is_a_conflict(self):
+        page, base = self.open_page()
+        other = json.loads(json.dumps(page))
+        other["components"]["db"]["workload"] = "data/StatefulSet/pg-new"
+        K.save_shards("c1", other)                                    # 다른 창에서 저장
+        before = (K.KNOWLEDGE / "c1" / "flows.yaml").read_text()
+        page["components"]["db"]["workload"] = "data/StatefulSet/pg-old"
+        with self.assertRaises(K.Conflict) as cm:
+            K.save_shards("c1", page, base=base)
+        self.assertEqual(cm.exception.items, ["구성요소 db(workload)"])
+        self.assertEqual((K.KNOWLEDGE / "c1" / "flows.yaml").read_text(), before)   # 아무것도 쓰지 않는다
+
+    def test_delete_vs_change_is_a_conflict(self):
+        page, base = self.open_page()
+        K.apply_additions("c1", {"components": {"db": {"aliases": ["피지"]}}})
+        del page["components"]["db"]
+        with self.assertRaises(K.Conflict) as cm:
+            K.save_shards("c1", page, base=base)
+        self.assertEqual(cm.exception.items, ["구성요소 db(지움)"])
+
+    def test_nothing_changed_meanwhile_saves_as_is(self):
+        page, base = self.open_page()
+        page["components"]["api"]["aliases"] = []
+        r = K.save_shards("c1", page, base=base)
+        self.assertEqual(r["merged"], [])
+        self.assertNotIn("aliases", K.load_flows("c1")["components"]["api"])
 
 
 class Migrate(unittest.TestCase):

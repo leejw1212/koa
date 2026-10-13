@@ -105,6 +105,11 @@ agent's process cleanup runs (that is how 8765 died once) — and don't `pkill` 
    (All POSTs need header `X-KOA: 1` and write knowledge — don't use them to verify.)
 3. Tell the user to refresh the browser tab.
 On a machine without the LaunchAgent: copy that plist (paths adjusted) and `launchctl bootstrap gui/$(id -u) <plist>`.
+The page also does this itself: it shows the running version and folder in the top bar, and when `distribution.yaml`
+on disk has another version than the running server (`GET /api/about`: `version` vs `disk_version`) it shows a
+"웹 다시 시작" button. `POST /api/restart` imports the new code in a child process first and, if that works, `exec`s
+the same command in place (same PID, so launchd/KeepAlive is unaffected). A server older than 0.2.18 has no
+`/api/about`; the page then says to restart it by hand.
 
 ## Testing technique
 
@@ -133,7 +138,7 @@ On a machine without the LaunchAgent: copy that plist (paths adjusted) and `laun
   print only rows whose output changed. Include questions that must NOT change (other flows) as a guard.
   Keep the harness in scratch; show the user the before/after table.
 
-## Learned skill and memory (`koa/learned.py`)
+## Learned skill (`koa/learned.py`)
 
 - KOA's own lessons go to the `koa-learned` skill, which is **not in the repo**: `hermes profile update`
   replaces only the files the distribution ships (per-file merge), so a profile-only skill survives while
@@ -146,9 +151,8 @@ On a machine without the LaunchAgent: copy that plist (paths adjusted) and `laun
   skills need the user's OK (SOUL 5). `hermes profile update` keeps the installed `config.yaml`, so a new
   config key in the repo must also be applied to existing installs with
   `env -u HERMES_HOME hermes -p <profile> config set <key> <value>` (never hand-edit or yaml-dump it).
-- Memory files use Hermes' format (`\n§\n` between entries) and lock (`<file>.lock` + flock, write temp +
-  `os.replace`). Delete by exact entry text so a concurrent change makes the delete fail instead of removing
-  the wrong entry. Memory changes reach the agent only in a new chat (system prompt is frozen per session).
+- The web does not show or edit memory (removed in 0.2.13: memory belongs to Hermes' own memory tools).
+  Memory changes reach the agent only in a new chat (system prompt is frozen per session).
 
 ## Knowledge rules (`knowledge.py context` / `add`) — pitfalls
 
@@ -170,3 +174,10 @@ On a machine without the LaunchAgent: copy that plist (paths adjusted) and `laun
   `knowledge.py check <c>` (must stay clean) and `context` on one question per new component.
 - Check what the web UI sees with `GET /api/knowledge/<c>`: count `understood.components/flows/normal`
   and expect `check == []`.
+- The web saves its whole state, so it sends `base` (`version` = hash of the flows.yaml it read + that state).
+  `save_shards(base=…)` merges with whatever was written meanwhile (`merge3`: per-field for components, list
+  fields and normal patterns keep both sides' adds/removes) and raises `Conflict` only when both sides changed
+  the same field or flow differently. Any read-modify-write of flows.yaml passes `base` the same way
+  (`apply_additions` does). Without it, a stale web page erases what `knowledge.py add` just wrote.
+- Normal patterns and incidents may name a group (`component: wrapper`); `context` and `check` resolve it with
+  `node_to_comps` like a flow node. An incident's group counts as one place for the "two components in scope" rule.

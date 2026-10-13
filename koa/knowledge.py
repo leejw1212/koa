@@ -130,9 +130,21 @@ def add_discovered_components(cluster, workloads):
     return r["components"], r["check"]
 
 
-def load_flows(cluster, notes=None):
+def _version(raw):
+    return hashlib.sha1(raw).hexdigest()[:12] if raw else ""
+
+
+def version(cluster):
+    """flows.yaml 내용의 짧은 해시 ('' = 파일 없음). 웹이 읽은 뒤 그사이 다른 곳(KOA 채팅 등)에서 바뀌었는지 본다."""
     f = cluster_dir(cluster) / "flows.yaml"
-    data = (yaml.safe_load(f.read_text()) or {}) if f.is_file() else {}
+    return _version(f.read_bytes() if f.is_file() else b"")
+
+
+def load_flows(cluster, notes=None, meta=None):
+    """meta 를 주면 meta["version"] 에 읽은 내용의 version() 을 넣는다 (읽은 바이트 그대로로 — 따로 다시 읽으면 그사이 바뀔 수 있다)."""
+    f = cluster_dir(cluster) / "flows.yaml"
+    raw = f.read_bytes() if f.is_file() else b""
+    data = (yaml.safe_load(raw) or {}) if raw else {}
     data.setdefault("schema", "koa.knowledge/v1")
     data.setdefault("cluster", cluster)
     for k in ("components", "flows"):
@@ -144,10 +156,13 @@ def load_flows(cluster, notes=None):
     if moved and f.is_file():
         bak = f.parent / "flows.yaml.pre-names.bak"
         if not bak.exists():
-            bak.write_text(f.read_text())
+            bak.write_bytes(raw)
         _write_flows(cluster, data)
+        raw = f.read_bytes()
         if notes is not None:
             notes.extend(moved)
+    if meta is not None:
+        meta["version"] = _version(raw)
     return data
 
 
@@ -377,40 +392,132 @@ def _hops(nodes, comps, kind=None):
              for a, b in zip(nodes, nodes[1:])], kind or "queue")
 
 
-def save_shards(cluster, sdata):
-    """웹 편집 화면의 전체 상태를 flows.yaml 로 쓴다 (덮어쓰기).
-    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[…]}], "normal": [{component, note}]}"""
-    comps = {}
-    for n, c in (sdata.get("components") or {}).items():
-        c = c or {}
-        comp = {}
-        for k in SCALAR_FIELDS + LIST_FIELDS:
-            v = c.get(k)
-            if v in (None, "", []) or (k in LIST_FIELDS and not isinstance(v, list)):
+def _clean_comp(c):
+    """구성요소에서 지식 칸만, 빈 값은 뺀다. workload 는 하나면 문자열, 여럿이면 목록."""
+    comp = {}
+    for k in SCALAR_FIELDS + LIST_FIELDS:
+        v = (c or {}).get(k)
+        if v in (None, "", []) or (k in LIST_FIELDS and not isinstance(v, list)):
+            continue
+        if k == "workload" and isinstance(v, list):
+            v = [str(x).strip() for x in v if str(x).strip()]
+            v = v[0] if len(v) == 1 else v or None
+            if not v:
                 continue
-            if k == "workload" and isinstance(v, list):
-                v = [str(x).strip() for x in v if str(x).strip()]
-                v = v[0] if len(v) == 1 else v or None
-                if not v:
-                    continue
-            comp[k] = v
-        if n:
-            comps[n] = comp
+        comp[k] = v
+    return comp
+
+
+def _norm(sdata):
+    """웹 화면 상태(흐름이 목록) 또는 load_flows 결과(흐름이 {이름: {kind, hops}})를 한 모양으로:
+    {"components": {이름: 칸}, "flows": {이름: {"kind", "nodes"}}, "normal": [{component, note}]}.
+    저장(save_shards)과 합치기(merge3)가 같은 규칙으로 보게 한다."""
+    sdata = sdata if isinstance(sdata, dict) else {}
+    cin = sdata.get("components") if isinstance(sdata.get("components"), dict) else {}
+    comps = {str(n): _clean_comp(c) for n, c in cin.items() if n}
+    fin = sdata.get("flows") or []
+    if isinstance(fin, dict):
+        fin = [{"name": n, "kind": (f or {}).get("kind"), "nodes": flow_nodes(f)} for n, f in fin.items()]
     flows = {}
-    for fl in (sdata.get("flows") or []):
-        name = (fl.get("name") or "").strip()
-        nodes = [x.strip() for x in (fl.get("nodes") or []) if x and x.strip()]
+    for fl in fin if isinstance(fin, list) else []:
+        fl = fl if isinstance(fl, dict) else {}
+        name = str(fl.get("name") or "").strip()
+        nodes = [str(x).strip() for x in (fl.get("nodes") or []) if x and str(x).strip()]
         if name and len(nodes) >= 2:
-            hops, kind = _hops(nodes, comps, fl.get("kind"))
-            flows[name] = {"kind": kind, "hops": hops}
+            flows[name] = {"kind": fl.get("kind") or _hops(nodes, comps)[1], "nodes": nodes}
     normal = []
-    for x in (sdata.get("normal") or []):
-        c, note = (x.get("component") or "").strip(), (x.get("note") or "").strip()
+    for x in sdata.get("normal") if isinstance(sdata.get("normal"), list) else []:
+        x = x if isinstance(x, dict) else {}
+        c, note = str(x.get("component") or "").strip(), str(x.get("note") or "").strip()
         if c and note and {"component": c, "note": note} not in normal:
             normal.append({"component": c, "note": note})
-    data = {"schema": "koa.knowledge/v1", "cluster": cluster, "components": comps, "flows": flows, "normal": normal}
+    return {"components": comps, "flows": flows, "normal": normal}
+
+
+class Conflict(ValueError):
+    """저장하는 사이 다른 곳(웹 화면, KOA 채팅의 add)에서 같은 칸을 다르게 고쳤다. items: 겹친 곳."""
+
+    def __init__(self, items):
+        ValueError.__init__(self, "저장하는 사이 다른 곳에서 같은 곳을 고쳤다: %s" % ", ".join(items))
+        self.items = items
+
+
+def _merge_list(b, m, t):
+    """목록 세 갈래: 지금 것(t)에서 내가(m) 뺀 것을 빼고, 내가 더한 것을 뒤에 붙인다. 양쪽 변경이 다 남는다."""
+    gone = [x for x in b if x not in m]
+    out = [x for x in t if x not in gone]
+    return out + [x for x in m if x not in b and x not in out]
+
+
+def _merge_one(b, m, t, fields):
+    """항목 하나(없으면 None)의 세 갈래. 반환 (값, 겹친 칸). fields=True 면 구성요소처럼 칸별로 합친다."""
+    if m == t or t == b:
+        return m, []
+    if m == b:
+        return t, []
+    if not fields:
+        return None, [""]
+    if m is None or t is None:                       # 한쪽은 지우고 다른 쪽은 고쳤다
+        return None, ["지움"]
+    b, out, bad = b or {}, {}, []
+    for k in list(m) + [k for k in t if k not in m]:
+        bv, mv, tv = b.get(k), m.get(k), t.get(k)
+        if k in LIST_FIELDS:
+            v = _merge_list(bv or [], mv or [], tv or [])
+        elif mv == tv or tv == bv:
+            v = mv
+        elif mv == bv:
+            v = tv
+        else:
+            bad.append(k)
+            continue
+        if v not in (None, "", []):
+            out[k] = v
+    return out, bad
+
+
+def merge3(base, mine, theirs):
+    """세 갈래 합치기 (모두 _norm 모양). base = 읽었던 것, mine = 그 위에 고친 것, theirs = 지금 파일.
+    한쪽만 바꾼 것은 그쪽을 따른다. 구성요소는 칸별로 합치고, 별명·로그 문구와 정상 패턴은 양쪽에서 더하고 뺀 것을 모두 남긴다.
+    같은 칸·같은 흐름을 양쪽에서 다르게 고쳤으면 Conflict. 반환: (합친 것, theirs 에서 들어온 변경 설명 목록)."""
+    out, came, bad = {}, [], []
+    for key, label in (("components", "구성요소"), ("flows", "흐름")):
+        b, m, t = base[key], mine[key], theirs[key]
+        res = {}
+        for n in list(m) + [n for n in t if n not in m] + [n for n in b if n not in m and n not in t]:
+            v, why = _merge_one(b.get(n), m.get(n), t.get(n), key == "components")
+            if why:
+                bad += ["%s %s%s" % (label, n, "(%s)" % w if w else "") for w in why]
+                continue
+            if v is not None:
+                res[n] = v
+            if t.get(n) != b.get(n) and m.get(n) != t.get(n):
+                came.append("%s %s%s" % (label, n, " (지움)" if t.get(n) is None else ""))
+        out[key] = res
+    out["normal"] = _merge_list(base["normal"], mine["normal"], theirs["normal"])
+    came += ["정상 패턴 %s" % x["component"] for x in theirs["normal"] if x not in base["normal"] and x not in mine["normal"]]
+    came += ["정상 패턴 %s (지움)" % x["component"] for x in base["normal"] if x not in theirs["normal"] and x in mine["normal"]]
+    if bad:
+        raise Conflict(bad)
+    return out, came
+
+
+def save_shards(cluster, sdata, base=None):
+    """웹 편집 화면의 전체 상태를 flows.yaml 로 쓴다.
+    sdata: {"components": {...}, "flows": [{"name","kind","nodes":[…]}], "normal": [{component, note}]}
+    base: {"version": 읽을 때의 version(), "data": 그때 상태}. 주면, 그사이 파일이 바뀌었을 때 덮어쓰지 않고 merge3 로 합쳐 쓴다
+    (웹에서 저장해도 KOA 채팅이 그사이 더한 것이 지워지지 않게). 같은 곳이 겹치면 Conflict 를 내고 쓰지 않는다.
+    반환의 "merged": 다른 쪽에서 들어와 함께 저장된 것 (없으면 [])."""
+    s, merged = _norm(sdata), []
+    if isinstance(base, dict) and base.get("version") is not None and str(base["version"]) != version(cluster):
+        s, merged = merge3(_norm(base.get("data")), s, _norm(load_flows(cluster)))
+    comps, flows = s["components"], {}
+    for name, f in s["flows"].items():
+        hops, kind = _hops(f["nodes"], comps, f["kind"])
+        flows[name] = {"kind": kind, "hops": hops}
+    data = {"schema": "koa.knowledge/v1", "cluster": cluster, "components": comps, "flows": flows, "normal": s["normal"]}
     _write_flows(cluster, data)
-    return {"components": comps, "flows": flows, "normal": normal, "check": check(cluster, data)}
+    return {"components": comps, "flows": flows, "normal": s["normal"], "check": check(cluster, data), "merged": merged}
 
 
 def apply_additions(cluster, add, apply=True):
@@ -419,7 +526,8 @@ def apply_additions(cluster, add, apply=True):
     - 기존 흐름과 같거나 그 일부인 흐름 → 건너뛴다
     반환: {"components": [새 이름], "updated": {이름: [칸]}, "flows": [(이름, 노드)], "normal": [...],
           "skipped": [(이름, 이유)], "check": [...], "saved": bool, "changed": bool}"""
-    data = load_flows(cluster)
+    meta = {}
+    data = load_flows(cluster, meta=meta)
     comps = {n: dict(c or {}) for n, c in data["components"].items()}
     by_wl = {}
     for n, c in sorted(comps.items(), key=lambda kv: len(comp_workloads(kv[1]))):   # 하나짜리가 먼저 차지한다
@@ -492,7 +600,8 @@ def apply_additions(cluster, add, apply=True):
     out = {"components": added_c, "updated": updated, "flows": added_f, "normal": added_n, "skipped": skipped,
            "saved": False, "changed": changed}
     if apply and changed:
-        out["check"] = save_shards(cluster, sdata)["check"]
+        # 읽고 쓰는 사이 웹에서 저장했어도 그 변경을 지우지 않게 읽은 버전을 같이 준다
+        out["check"] = save_shards(cluster, sdata, base={"version": meta["version"], "data": data})["check"]
         out["saved"] = True
     else:
         tmp = {"components": comps, "normal": normal,
@@ -552,6 +661,14 @@ def incident_meta(text, comps):
     low = text.lower()
     found = [n for n, c in sorted((comps or {}).items(), key=lambda kv: -len(kv[0]))
              if any(a and a.lower() in low for a in [n] + list((c or {}).get("aliases") or []))]
+    # 그룹 이름 ("wrapper 전체가 502") → 그 이름 그대로 (분석은 그룹의 구성요소 전부로 본다).
+    # 찾은 구성요소 이름·별명 자리는 지우고 본다: 'admin-wrapper' 를 적었다고 그룹 'wrapper' 까지 붙지 않게
+    rest = low
+    for n in found:
+        for a in sorted([n] + list((comps[n] or {}).get("aliases") or []), key=lambda x: -len(str(x))):
+            if a:
+                rest = rest.replace(str(a).lower(), " ")
+    found += [g for g in sorted(groups(comps), key=lambda x: -len(x)) if g.lower() in rest and g not in found]
     if found:
         meta["components"] = found
     quotes = []
@@ -748,8 +865,8 @@ def check(cluster, data=None):
             out.append(("warn", "흐름 %s: 한 줄이 아니라 갈래가 있다 (%s). 웹 화면은 한 줄로만 다뤄 저장하면 순서가 바뀐다 → "
                                 "갈래는 별도 흐름으로 (knowledge.py add)" % (fname, flow_text(f))))
     for n in data.get("normal") or []:
-        if isinstance(n, dict) and n.get("component") and n["component"] not in comps:
-            out.append(("warn", "정상 패턴: '%s' 가 구성요소에 없다" % n["component"]))
+        if isinstance(n, dict) and n.get("component") and not node_to_comps(n["component"], comps):
+            out.append(("warn", "정상 패턴: '%s' 는 구성요소·그룹 이름이 아니다" % n["component"]))
     seen, uniq = set(), []
     for x in out:
         if x not in seen:
@@ -851,12 +968,20 @@ def context(cluster, question, names=None, data=None, incidents=None):
     for inc in incidents:
         m = inc["meta"]
         ic = [str(x) for x in (m.get("components") or [])]
+        # 이슈의 구성요소 칸에 그룹 이름을 썼으면 그 그룹의 구성요소 전부 (흐름 칸과 같은 규칙). 그룹 하나는 한 곳으로 센다
+        ics = [set(node_to_comps(x, comps) or [x]) for x in ic]
         sig = incident_logs(m)
-        if set(ic) & set(picked_c) or len(set(ic) & set(scope)) >= 2 or any(s.lower() in q for s in sig):
+        if any(s & set(picked_c) for s in ics) or sum(1 for s in ics if s & set(scope)) >= 2 \
+                or any(s.lower() in q for s in sig):
             known.append({"file": inc["file"], "date": str(m.get("date") or ""), "cause": m.get("cause") or "",
                           "components": ic, "logs": sig,
                           "recurrences": len([r for r in (m.get("recurrences") or []) if isinstance(r, dict)])})
-    normal = [n for n in data.get("normal") or [] if isinstance(n, dict) and n.get("component") in scope]
+    # 정상 패턴도 구성요소 이름이나 그룹 이름 (그룹이면 그 구성요소 중 하나라도 범위에 있을 때)
+    normal = []
+    for n in data.get("normal") or []:
+        members = node_to_comps(n.get("component"), comps) if isinstance(n, dict) else []
+        if set(members) & set(scope):
+            normal.append(n if n.get("component") in comps else dict(n, members=members))
     if not picked_c and not picked_f:
         notes.append("질문에서 지식 속 구성요소·흐름을 못 찾았다 → 어느 구성요소/흐름인지 사용자에게 묻는다 "
                      "(답을 들으면 그 말을 별명으로 더하자고 제안)")
@@ -885,7 +1010,8 @@ def context_text(p):
                                             (" (로그: %s)" % ", ".join(k["logs"])) if k["logs"] else "",
                                             (" [재발 %d회]" % k["recurrences"]) if k.get("recurrences") else ""))
     for n in p["normal"]:
-        L.append("정상 패턴 %s: %s" % (n.get("component"), n.get("note")))
+        L.append("정상 패턴 %s%s: %s" % (n.get("component"),
+                                       " (그룹: %s)" % ", ".join(n["members"]) if n.get("members") else "", n.get("note")))
     for n in p["notes"]:
         L.append("참고: %s" % n)
     return "\n".join(L)

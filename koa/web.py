@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """KOA 웹 화면 — 클러스터 지식(구성요소·흐름·정상 패턴·제안)과 과거 이슈를 보고 고친다.
-KOA 가 배운 것(이 프로필의 메모리, KOA 가 만들거나 고친 스킬)도 보여 준다 (learned.py).
+KOA 가 배운 것(정상 패턴, KOA 가 만들거나 고친 스킬)도 보여 준다 (learned.py).
 
   python3 koa/web.py                 # http://127.0.0.1:8765
   python3 koa/web.py --port 9000
 
 분석은 KOA 채팅에서 한다. 이 화면은 지식 파일만 읽고 쓴다 (local/knowledge/<클러스터>/, knowledge.py 와 같은 파일).
 표준 라이브러리 + PyYAML 만 쓴다. 클러스터에는 워크로드 목록 조회(get/list) 하나만 보낸다.
+
+화면 위에 이 웹의 버전과 폴더를 보여 준다. 프로필 업데이트(또는 git pull)로 디스크의 코드가 다른 버전이 되면
+'웹 다시 시작' 버튼을 띄우고, 누르면 이 프로세스가 새 코드로 다시 뜬다 (같은 PID 로 exec — LaunchAgent 도 그대로).
 """
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -26,13 +30,15 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import knowledge as K  # noqa: E402
 import learned as L  # noqa: E402
-from paths import REPO  # noqa: E402
+from paths import INSTALLED, REPO  # noqa: E402
 
 HTML = Path(__file__).resolve().parent / "web" / "index.html"
 FILE_RE = re.compile(r"^[0-9A-Za-z가-힣._-]{1,80}\.md$")
 SID_RE = re.compile(r"^[0-9a-f]{10}$")
 _lock = threading.Lock()
 _REMOTE = False  # --host 0.0.0.0 이면 True (외부 접속 허용)
+# 다시 시작할 때 같은 인자로 exec 한다 (작업 폴더가 그대로라 상대 경로도 되지만 절대 경로로 둔다)
+ARGV = [sys.executable, "-u", str(Path(sys.argv[0]).resolve())] + sys.argv[1:]
 
 
 def rel(p):
@@ -46,14 +52,87 @@ def checks(lst):
     return [{"level": lv, "msg": m} for lv, m in lst]
 
 
+def tilde(p):
+    """화면에 보여 줄 경로: 홈은 ~ 로."""
+    p, h = str(p), str(Path.home())
+    return "~" + p[len(h):] if p == h or p.startswith(h + os.sep) else p
+
+
+# ---------- 이 웹의 버전과 위치 ----------
+
+def dist_version():
+    """디스크에 있는 distribution.yaml 의 버전 (지금 읽은 값)."""
+    try:
+        return str((yaml.safe_load((REPO / "distribution.yaml").read_text()) or {}).get("version") or "")
+    except (OSError, yaml.YAMLError, AttributeError):
+        return ""
+
+
+STARTED_VERSION = dist_version()   # 이 프로세스가 뜰 때의 버전. 디스크와 다르면 새 코드가 깔린 것
+
+
+def installed_profiles():
+    """이 컴퓨터에 설치된 KOA 프로필 폴더 (개발 체크아웃에서 띄운 웹이 '다른 폴더' 임을 알릴 때)."""
+    out = []
+    for f in sorted((Path.home() / ".hermes" / "profiles").glob("*/distribution.yaml")):
+        try:
+            if (yaml.safe_load(f.read_text()) or {}).get("name") == "koa":
+                out.append(tilde(f.parent))
+        except (OSError, yaml.YAMLError, AttributeError):
+            continue
+    return out
+
+
+def about():
+    return {"version": STARTED_VERSION, "disk_version": dist_version(), "home": tilde(REPO),
+            "installed": INSTALLED, "knowledge": tilde(K.KNOWLEDGE),
+            "profiles": [] if INSTALLED else installed_profiles()}
+
+
+def check_new_code():
+    """디스크의 코드가 import 되는지 다른 프로세스로 본다 (깨진 코드로 다시 시작해 웹이 죽지 않게). 문제 없으면 None."""
+    try:
+        p = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import web",
+                            str(Path(__file__).resolve().parent)],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as x:
+        return str(x)
+    if p.returncode == 0:
+        return None
+    lines = [x.strip() for x in p.stderr.decode("utf-8", "replace").splitlines() if x.strip()]
+    return " / ".join(lines[-4:])[-500:]   # 마지막 줄들: 어느 파일 몇째 줄, 무슨 오류
+
+
+def _reexec():
+    time.sleep(0.5)  # 응답을 다 보낸 뒤
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, ARGV)
+
+
 # ---------- 지식 ----------
+
+def stamp(c):
+    """지식 폴더가 바뀌었는지 알아보는 짧은 값 (flows.yaml·제안·과거 이슈 파일의 수정 시각과 크기).
+    화면이 다시 보일 때 이 값이 다르면, 고치던 것이 없으면 새로 읽는다."""
+    d = K.cluster_dir(c)
+    parts = []
+    for f in [d / "flows.yaml", d / "suggestions.yaml"] + sorted((d / "incidents").glob("*.md")):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        parts.append("%s:%d:%d" % (f.name, st.st_mtime_ns, st.st_size))
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
+
 
 def get_knowledge(c):
     d = K.cluster_dir(c)
     if not d.is_dir():
         raise LookupError("지식이 없는 클러스터: %s" % c)
-    moved = []
-    data = K.load_flows(c, notes=moved)
+    st = stamp(c)  # 읽기 전에: 읽는 사이 바뀌면 다음 확인에서 다르게 보여 다시 읽는다
+    moved, meta = [], {}
+    data = K.load_flows(c, notes=moved, meta=meta)
     incs = K.load_incidents(c)
     for i in incs:
         i["text"] = i["body"] or incident_text_from_meta(i["meta"])
@@ -66,7 +145,9 @@ def get_knowledge(c):
         "suggestions": K.list_suggestions(c),
         "check": checks(K.check(c, data)),
         "migrated": moved,
-        "path": rel(d),
+        "path": tilde(d),
+        "version": meta["version"],   # 저장할 때 돌려받아, 그사이 바뀐 것을 덮지 않고 합친다 (knowledge.save_shards)
+        "stamp": st,
     }
 
 
@@ -208,6 +289,15 @@ class Handler(BaseHTTPRequestHandler):
             if parts[:1] != ["api"]:
                 return self._send(404, {"error": "not found"})
             p = parts[1:]
+            if method == "GET" and p == ["about"]:
+                return self._send(200, about())
+            if method == "POST" and p == ["restart"]:
+                err = check_new_code()
+                if err:
+                    return self._send(500, {"error": "새 코드를 불러오지 못해 다시 시작하지 않았습니다: %s" % err})
+                self._send(200, {"ok": True, "version": dist_version()})
+                threading.Thread(target=_reexec, daemon=True).start()
+                return
             if method == "GET" and p == ["clusters"]:
                 return self._send(200, dict(cluster_info(), knowledge=rel(K.KNOWLEDGE)))
             if method == "POST" and p == ["clusters"]:
@@ -228,6 +318,8 @@ class Handler(BaseHTTPRequestHandler):
                 c = p[1]
                 if method == "GET" and len(p) == 2:
                     return self._send(200, get_knowledge(c))
+                if method == "GET" and p[2:] == ["stamp"]:
+                    return self._send(200, {"stamp": stamp(c)})
                 if method == "GET" and p[2:] == ["candidates"]:
                     return self._send(200, {"candidates": K.discover_candidates(c)})
                 if method == "POST" and p[2:] == ["add_components"]:
@@ -235,9 +327,15 @@ class Handler(BaseHTTPRequestHandler):
                         added, chk = K.add_discovered_components(c, body.get("workloads") or [])
                     return self._send(200, {"added": added, "check": checks(chk)})
                 if method == "POST" and p[2:] == ["shards"]:
+                    base = body.get("base")
+                    if base is not None and not isinstance(base, dict):
+                        raise ValueError("base 형식이 아니다")
                     with _lock:
-                        saved = K.save_shards(c, body)
-                    return self._send(200, {"check": checks(saved["check"])})
+                        try:
+                            saved = K.save_shards(c, body, base=base)
+                        except K.Conflict as x:
+                            return self._send(409, {"error": str(x), "conflicts": x.items})
+                    return self._send(200, {"check": checks(saved["check"]), "merged": saved["merged"]})
                 if method == "POST" and len(p) == 5 and p[2] == "suggestions" and p[4] in ("accept", "dismiss"):
                     if not SID_RE.match(p[3]):
                         raise ValueError("제안 id 형식이 아니다")
@@ -275,7 +373,7 @@ def main():
         _REMOTE = True
         print("⚠ 경고: %s 으로 열어 외부 접속을 허용했습니다. 인증이 없어 누구나 지식을 고칠 수 있습니다." % a.host)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print("KOA 웹: http://%s:%d  (지식 %s)  Ctrl+C 로 끝" % (a.host, a.port, rel(K.KNOWLEDGE)))
+    print("KOA 웹 %s: http://%s:%d  (지식 %s)  Ctrl+C 로 끝" % (STARTED_VERSION, a.host, a.port, tilde(K.KNOWLEDGE)))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

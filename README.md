@@ -48,7 +48,8 @@ KOA 가 하는 일 (스킬 `koa-cluster-discovery`):
 
 ### 웹 화면 (클러스터 지식 · 과거 이슈 · KOA 가 배운 것)
 
-YAML 을 직접 쓰지 않고 표와 폼으로 지식을 보고 고친다. flowmap 이나 분석이 남긴 제안을 더하거나 버린다. 이 컴퓨터에서만 열린다 (127.0.0.1).
+YAML 을 직접 쓰지 않고, 구성요소·흐름·정상 패턴을 줄로 보고 줄을 눌러 그 자리에서 고친다. flowmap 이나 분석이 남긴 제안을 더하거나 버린다.
+웹에서 저장해도 그사이 KOA 채팅이 더한 지식은 지우지 않고 합친다. 이 컴퓨터에서만 열린다 (127.0.0.1).
 
 ```bash
 cd ~/.hermes/profiles/koa && /usr/bin/python3 koa/web.py     # → http://127.0.0.1:8765
@@ -78,6 +79,8 @@ cd ~/.hermes/profiles/koa && /usr/bin/python3 koa/web.py     # → http://127.0.
 hermes profile update koa                 # SOUL·스킬·koa/ 갱신, config.yaml 은 유지 (등록한 MCP 보존)
 hermes profile update koa --force-config  # config.yaml 도 저장소 것으로 (등록한 MCP 사라짐 → 온보딩 다시)
 ```
+
+업데이트한 뒤 웹 화면으로 돌아가면 "웹 다시 시작" 버튼이 뜬다. 누르면 새 버전으로 다시 뜬다 (화면 위에 지금 버전과 폴더가 보인다).
 
 ## 개발 (이 저장소에서 직접)
 
