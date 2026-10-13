@@ -35,14 +35,16 @@
 | 과거 이슈 1건 = 파일 1개 | `local/knowledge/<클러스터>/incidents/*.md` | 사용자 OK 후 KOA (`knowledge.py incident`), 웹 화면 |
 | 아직 확인 안 된 제안 | `local/knowledge/<클러스터>/suggestions.yaml` | flowmap, KOA (`knowledge.py suggest`) → 웹에서 더하기/버리기 |
 | 자유 메모 | `local/knowledge/<클러스터>/architecture.md` | 사용자 |
-| 분석 요령 (어느 클러스터에나 통하는 것) | 스킬 `koa-learned` (프로필에만 있고 저장소에 없어서 업데이트가 덮지 않는다) | KOA (알려 주고 바로) |
+| 분석 요령 (어떻게 보는가. 클러스터 이름이 예로 들어가도 된다) | 스킬 `koa-learned` (프로필에만 있고 저장소에 없어서 업데이트가 덮지 않는다). 분석마다 통째로 읽히니 한 줄~두 줄씩 | KOA (알려 주고 바로) |
+| KOA 자체를 만들고 운영하는 요령 (웹 재시작, 프로필 동기화, 벤치마크) | 프로필 전용 스킬 (예: `koa-dev-notes`) — 분석 때는 안 읽힌다 | KOA (처음 만들 때만 사용자 OK) |
 | 사용자·환경에 대한 짧은 사실 | Hermes 메모리 | KOA |
 
 **새 스킬은 사용자에게 묻고 만든다.** KOA 는 스킬로 남길 만한 것이 보이면 이름·언제 쓰이는지·내용을 두세 줄로 설명하고, 사용자가 OK 해야 만든다 (`koa-learned` 에 교훈 한 줄 더하기는 지금처럼 알리고 바로).
 Hermes 가 대화 끝에 뒤에서 스킬을 만들고 고치는 기능(background review)은 배포 `config.yaml` 에서 끈다 (`auxiliary.background_review.enabled: false`). 켜 두면 세션 복구 절차처럼 클러스터 분석과 상관없는 스킬이 묻지도 않고 생긴다.
 프로필 업데이트는 이미 있는 `config.yaml` 을 덮지 않으므로, 전에 설치한 프로필에는 한 번 직접 넣는다: `hermes -p koa config set auxiliary.background_review.enabled false`.
 
-클러스터 이름·흐름은 메모리나 스킬에 넣지 않는다. 메모리는 매 턴 들어가고 크기 제한이 있어서, 클러스터 지식은 파일에 두고 필요할 때 그 부분만 꺼낸다.
+클러스터에 대한 사실(라벨, 시계 오프셋, 무엇이 무엇을 부르는지)은 메모리나 스킬이 아니라 지식 노트에 둔다. 유출 걱정 때문이 아니라 읽히는 방식 때문이다:
+메모리는 매 턴, 스킬은 분석마다 통째로 들어가지만, 지식은 질문에 걸린 구성요소의 것만 꺼낸다. 같은 사실이 두 곳에 있으면 한쪽만 고쳐져 어긋난다.
 `local/` 은 프로필 업데이트에도 유지되고, 회사 내부 이름이 들어가므로 저장소에는 커밋하지 않는다.
 
 ## 2. `flows.yaml`
@@ -122,8 +124,11 @@ python3 koa/knowledge.py context <c> "rmq 소비가 안 돼"        # ① 이 �
 python3 koa/knowledge.py context <c> --with rabbitmq,order-worker   # 사용자가 이름을 짚어 줬을 때
 python3 koa/knowledge.py notes <c> [찾을 말] [--untyped]         # 노트 목록 (주제 노트 포함, 종류 없는 것은 제안 종류와)
 python3 koa/knowledge.py add <c> '<json>' [--dry-run]           # ③ OK 받은 것만 더한다
+python3 koa/knowledge.py note <c> '{"component":…,"match":"글 일부","note"?:…,"kind"?:…,"remove"?:true}' [--dry-run]
+                                                                # 노트 하나 고치기·지우기 (틀린 노트, 중복, 종류 잘못, 지난 평소 수치)
 python3 koa/knowledge.py incident <c> '<json>'                  # 과거 이슈 1건
-python3 koa/knowledge.py recur <c> <이슈파일> '{"date":…,"note":…}'  # 같은 원인 재발: 기존 이슈에 한 줄 (새 파일 안 만듦)
+python3 koa/knowledge.py recur <c> <이슈파일> '{"date":…,"note":…,"components"?:[…]}'  # 같은 원인 재발: 기존 이슈에 한 줄 (새 파일 안 만듦).
+                                                                # 다른 구성요소에서 재발했으면 components 로 그 구성요소도 이슈에 붙인다
 python3 koa/knowledge.py suggest <c> '<json>' --title … --why …  # 나중에 고를 제안
 python3 koa/knowledge.py suggestions <c> | accept <c> <id> | dismiss <c> <id>
 python3 koa/knowledge.py check <c>                              # 워크로드·흐름 매칭 검사
@@ -137,6 +142,10 @@ python3 koa/knowledge.py check <c>                              # 워크로드·
 
 `context` 가 꺼내는 범위: 질문에서 찾은(또는 `--with`) 구성요소·흐름 → 그걸 지나는 흐름 → 그 흐름 위 구성요소 → 이들과 관련된 과거 이슈·노트,
 그리고 주제 노트. 구성요소는 더 넓히지 않는다.
+**그룹 칸은 "이 중 하나 이상"** 이라 형제 멤버는 이번 경로가 아니다. 그래서 질문이 그룹의 멤버 하나(`billing-api`)를 짚으면 그 칸에서는
+그 멤버만 범위에 넣고, 나머지는 이름만 한 줄로 알린다 (`그룹 백엔드 (16개 …): 이번 범위 billing-api — 나머지는 범위에서 뺐다: …`).
+아무 멤버도 안 짚은 그룹 칸은 `GROUP_EXPAND`(5) 개 이하면 전부, 넘으면 이름만 둔다. 그룹 이름이나 흐름 이름을 말하면 전부.
+그룹에 붙은 노트는 그 그룹 칸이 범위의 흐름 위에 있으면 늘 같이 간다. (0.2.20 실측: 백엔드 16개 그룹이 있는 실제 지식에서 멤버 하나를 물을 때 context 25~52% 감소)
 이름이 하나도 안 걸리면 질문 낱말(조사를 뗀 한글 두 글자 이상, 영문·숫자 세 글자 이상)이 가장 많이 겹치는 흐름으로 시작한다
 (흐름 이름·별명, 칸 이름, 그 구성요소의 별명·로그 문구·그룹과 견준다. 같은 점수면 둘까지). 분석은 첫 줄에 "X 흐름으로 읽었어요. 아니면 알려 주세요" 라고 쓰고
 계속한다. 겹치는 흐름이 없거나 셋 이상 비기면 "어느 구성요소/흐름인지 사용자에게 묻는다" 고 알려 준다 — 클러스터 전체를 훑지 않는다.
@@ -147,6 +156,11 @@ python3 koa/knowledge.py check <c>                              # 워크로드·
 모르는 종류는 건너뛰고 알린다. 저장 전 파일은 `flows.yaml.bak`.
 
 제안은 내용으로 중복을 거르고, 버린 제안은 기억해서 다시 내지 않는다. 이미 지식에 있는 내용이면 남기지 않는다.
+
+`check` 는 흐름·구성요소 말고도 다음을 알린다 (0.2.20):
+- 과거 이슈의 머리말이 YAML 오류로 안 읽히거나(따옴표 없는 `?…]` 등), `components` 가 지식의 구성요소·그룹 이름이 아니다 → 그 이슈는 어떤 분석에도 안 나온다.
+- 과거 이슈의 로그 문구가 IP 나 짧은 낱말(9자 이하, 예: `aiohttp`) → 정상 로그에도 걸려 거짓 단서가 된다.
+- `baseline`(평소 수치) 노트에 잰 날짜가 없거나 `BASELINE_DAYS`(60) 일이 지났다 → 다시 재서 `knowledge.py note` 로 고친다.
 
 ## 4. 웹 화면 (`koa/web.py`)
 

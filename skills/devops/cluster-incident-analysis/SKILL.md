@@ -80,7 +80,9 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    (ready/restarts/lastState), events for those pods in the window, logs (the window, `tail`, the component's
    `로그` lines), and the call to the next hop. Judge each against its notes before calling it abnormal (a
    `판정 규칙` may settle the hop at once; a matching `정상 패턴` means "not the cause", say so). A note on a
-   group (`노트 wrapper (그룹: …)`) holds for each member.
+   group (`노트 wrapper (그룹: …)`) holds for each member. When you asked about one member of a big group, the
+   slice keeps only that member (`그룹 백엔드 (16개 …): 이번 범위 …`); siblings are other branches of that hop,
+   not this path — widen with `--with <이름>` only when the evidence points there.
    The cause point is where the flow turns from normal to abnormal.
 5. **Hypotheses**: 2–3 with evidence for/against; share the early read, then confirm.
 6. **Report**: conclusion + confidence, the time window you looked at, evidence table (hop · what was checked ·
@@ -103,7 +105,11 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    ```
    **Same cause as a past incident in the slice → don't propose a new incident.** Propose "재발" instead and,
    after OK, append it to that file: `python3 koa/knowledge.py recur <c> <incident-file> '{"date": "…", "note":
-   "한 줄", "logs": ["새로 본 문구"]}'`. A new incident is only for a cause not already recorded.
+   "한 줄", "logs": ["새로 본 문구"], "components": ["재발한 구성요소"]}'` — add `components` when it recurred on
+   another component, or that component's analyses never see the incident. A new incident is only for a cause
+   not already recorded. Incident `components` must be component/group names in the knowledge (register the
+   workload first if needed) and `logs` must be distinctive log phrases — not IPs or bare library names, which
+   also match normal traffic (`check` warns on both).
    A note or incident that holds for a whole group (every wrapper console) names the group, like a flow
    node: `{"component": "wrapper", …}`, `"components": ["wrapper"]`.
    **Every new note gets a kind**: `rule` (판정 규칙) · `howto` (보는 법) · `pitfall` (함정) · `baseline` (평소 수치,
@@ -114,6 +120,10 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    guess); after OK, `add` the same component + note with `"kind"` — it fills an empty kind and never changes one
    already set. The user words a flow by another name ("카드 만들기") → propose it as a flow alias.
    `add` only adds (merges list fields, fills empty fields, skips flows already known); show its output.
+   A note that turned out wrong, a duplicate, a measured number filed under the wrong kind, or a stale
+   `baseline` → propose the fix in the same table ("노트 고침/지움"); after OK use
+   `python3 koa/knowledge.py note <c> '{"component": "…", "match": "글 일부", "note"?: "새 글", "kind"?: "baseline", "remove"?: true}'`
+   (`--dry-run` first). Measured numbers go in `baseline` notes with the date, not inside `structure`.
    **Never edit `flows.yaml` by hand.** A flow is one straight chain; a side call (web also writes to redis) is its
    own flow, e.g. `{"name": "카드-접수-저장", "nodes": ["linkcard-web", "redis"]}`. If `add` skips it as "already
    inside a known flow", that hop is already known — say so instead of forcing it in. Run `knowledge.py check`
@@ -130,7 +140,12 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    line what you saved). Never defer it to "a later/interactive session": skill_manage works in every mode,
    including one-shot `chat -q`. Skip only if the lesson is already in `koa-learned`. a cluster-independent analysis lesson →
    one line under "## Lessons" of the `koa-learned` skill (skill_manage patch; `python3 koa/learned.py init` if
-   it is missing). Don't patch this skill for that: it is shipped and a profile update overwrites it. A stable
+   it is missing). Don't patch this skill for that: it is shipped and a profile update overwrites it. Keep each
+   lesson to one or two lines — `koa-learned` loads with every analysis, so its size is paid every time. A fact
+   about the cluster (an offset, a label, a host) is a knowledge note, not a lesson: propose it in the table.
+   Lessons about developing or operating KOA itself (web restart, profile sync, benchmark harness, MCP install) do
+   not go in `koa-learned`; put them in the profile's KOA development notes skill if it exists (e.g.
+   `koa-dev-notes`), otherwise ask before creating one. A stable
    user/environment fact → memory, as one short Korean sentence (keep tool and cluster identifiers as they are).
    Never put cluster names/flows there. The web UI tab "KOA 가 배운 것" shows `koa-learned` (and the cluster's
    notes); it does not show memory — that stays with Hermes' own memory tools.

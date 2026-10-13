@@ -89,9 +89,15 @@ class Context(unittest.TestCase):
         p = K.context("c1", "manager-wrapper 가 500 을 낸다", data=d, incidents=[])
         self.assertIn("콘솔", p["flows"])                                   # 멤버를 물어도 그룹 칸의 흐름
         self.assertEqual(p["groups"], {"wrapper": ["admin-wrapper", "manager-wrapper", "user-wrapper"]})
-        self.assertIn("user-wrapper", p["components"])
+        self.assertEqual(p["group_scope"], {"wrapper": ["manager-wrapper"]})   # 말한 멤버만 범위에 (나머지는 다른 갈래)
+        self.assertNotIn("user-wrapper", p["components"])
         self.assertNotIn("other", p["components"])
-        self.assertIn("그룹 wrapper:", K.context_text(p))
+        self.assertIn("그룹 wrapper (3개", K.context_text(p))
+        self.assertIn("user-wrapper", K.context_text(p))                     # 이름은 남긴다 (넓힐 때 쓰게)
+        # 그룹 이름을 말하면 전부
+        self.assertIn("user-wrapper", K.context("c1", "wrapper 가 이상해", data=d, incidents=[])["components"])
+        # 멤버를 안 말한 작은 그룹 칸(GROUP_EXPAND 이하)은 전부 범위에
+        self.assertIn("user-wrapper", K.context("c1", "nginx 가 느려", data=d, incidents=[])["components"])
         # 띄어 쓴 이름은 그 구성요소 하나 (그룹 이름 'wrapper' 로 셋 다 잡히지 않게)
         d["components"]["manager-console-wrapper"] = d["components"].pop("manager-wrapper")
         self.assertEqual(K.context("c1", "manager console wrapper 에서 502", data=d, incidents=[])["asked"],
@@ -185,7 +191,7 @@ class Notes(unittest.TestCase):
         self.assertNotIn("래빗", [n["component"] for n in p["topics"]])
         self.assertIn("노트 래빗 (= mq) [평소 수치]: 큐 길이 1000 까지는 평소", K.context_text(p))
         self.assertNotIn("래빗", [n["component"] for n in K.context("c1", "pg 가 느려", data=d, incidents=[])["normal"]])
-        self.assertEqual([m for _, m in K.check("c1", d) if "래빗" in m], [])
+        self.assertEqual([m for _, m in K.check("c1", d) if "래빗" in m and "날짜" not in m], [])   # 별명 대상은 경고 안 함 (평소 수치 날짜 경고는 별개)
 
     def test_topic_budget_keeps_relevant_first(self):
         d = self.data()
@@ -557,6 +563,110 @@ class Migrate(unittest.TestCase):
                 self.assertEqual(again, [])
             finally:
                 K.KNOWLEDGE = orig
+
+
+class BigGroupScope(unittest.TestCase):
+    """큰 그룹 칸(백엔드 여럿)이 흐름에 있을 때 context 가 형제 멤버의 노트·구성요소를 끌고 오지 않는다."""
+
+    def data(self):
+        comps = {"nginx": {"workload": "i/DaemonSet/nginx"}, "mq": {"workload": "m/StatefulSet/mq", "kind": "message-queue"}}
+        for i in range(8):
+            comps["api-%d" % i] = {"workload": "b/Deployment/api-%d" % i, "group": "백엔드"}
+        return {"components": comps,
+                "flows": {"http": {"hops": ["nginx", "백엔드"]}, "알림": {"hops": [
+                    {"from": "백엔드", "to": "mq", "role": "produce"}]}},
+                "normal": [{"component": "api-1", "note": "api-1 노트", "kind": "structure"},
+                           {"component": "api-2", "note": "api-2 노트", "kind": "structure"},
+                           {"component": "백엔드", "note": "그룹 노트", "kind": "structure"}]}
+
+    def test_member_question_keeps_only_member(self):
+        p = K.context("c1", "api-1 세션 추적", data=self.data(), incidents=[])
+        self.assertEqual(sorted(p["components"]), ["api-1", "mq", "nginx"])
+        self.assertEqual([n["note"] for n in p["normal"]], ["api-1 노트", "그룹 노트"])
+        t = K.context_text(p)
+        self.assertIn("그룹 백엔드 (8개", t)
+        self.assertIn("노트 백엔드 (그룹 8개) [구조]: 그룹 노트", t)
+
+    def test_unnamed_big_group_is_names_only(self):
+        p = K.context("c1", "mq 가 쌓여", data=self.data(), incidents=[])
+        self.assertEqual(sorted(p["components"]), ["mq"])
+        self.assertEqual(p["group_scope"], {"백엔드": []})
+        self.assertEqual([n["note"] for n in p["normal"]], ["그룹 노트"])      # 그룹 노트는 남는다
+        self.assertIn("멤버가 많아 이름만 둔다", K.context_text(p))
+
+    def test_group_named_takes_all(self):
+        p = K.context("c1", "", names=["백엔드"], data=self.data(), incidents=[])
+        self.assertEqual(len([c for c in p["components"] if c.startswith("api-")]), 8)
+
+
+class CheckIncidentsAndBaseline(unittest.TestCase):
+    def test_incident_component_unknown_and_weak_signature(self):
+        d = {"components": {"api": {"workload": "a/Deployment/api"}}, "flows": {}, "normal": []}
+        incs = [{"file": "x.md", "meta": {"components": ["api-outbox"], "signature": {"logs": [
+            "10.1.2.3", "aiohttp", "Authorization failed for token"]}}}]
+        msgs = [m for _, m in K.check("c1", d, incidents=incs)]
+        self.assertTrue(any("x.md" in m and "'api-outbox'" in m and "안 나온다" in m for m in msgs))
+        self.assertTrue(any("'10.1.2.3'" in m for m in msgs))
+        self.assertTrue(any("'aiohttp'" in m for m in msgs))
+        self.assertFalse(any("Authorization failed" in m for m in msgs))
+        self.assertEqual(K.check("c1", d, incidents=[{"file": "y.md", "meta": {"components": ["api"]}}]), [])
+        bad = K.parse_front("---\nlogs: [a, /x?y=]\n---\n본문")[0]           # 따옴표 없는 ?…] 는 YAML 오류 → 머리말이 빈다
+        self.assertTrue(any("z.md" in m and "읽지 못했다" in m
+                            for _, m in K.check("c1", d, incidents=[{"file": "z.md", "meta": bad}])))
+
+    def test_baseline_needs_date_and_ages(self):
+        d = {"components": {"api": {"workload": "a/Deployment/api"}}, "flows": {}, "normal": [
+            {"component": "api", "note": "분당 300건", "kind": "baseline"},
+            {"component": "api", "note": "분당 200건 (2020-01-01 잼)", "kind": "baseline"},
+            {"component": "api", "note": "분당 250건 (%s 잼)" % K.dt.date.today().isoformat(), "kind": "baseline"}]}
+        msgs = [m for _, m in K.check("c1", d, incidents=[])]
+        self.assertEqual(len(msgs), 2)
+        self.assertTrue(any("날짜가 없다" in m for m in msgs))
+        self.assertTrue(any("2020-01-01" in m and "다시 재서" in m for m in msgs))
+
+
+class EditNoteAndRecur(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.orig, K.KNOWLEDGE = K.KNOWLEDGE, Path(self.t.name)
+        (Path(self.t.name) / "c").mkdir()
+        K._write_flows("c", {"schema": "koa.knowledge/v1", "cluster": "c",
+                             "components": {"api": {"workload": "a/Deployment/api"}, "job": {"workload": "a/Deployment/job"}},
+                             "flows": {"f": {"kind": "http", "hops": ["api", "job"]}},
+                             "normal": [{"component": "api", "note": "request-id 는 안 남는다", "kind": "howto"},
+                                        {"component": "api", "note": "6h 1,000건 (2026-10-12)", "kind": "structure"}]})
+
+    def tearDown(self):
+        K.KNOWLEDGE = self.orig
+        self.t.cleanup()
+
+    def test_edit_kind_text_and_remove(self):
+        r = K.edit_note("c", {"component": "api", "match": "6h 1,000", "kind": "baseline"})
+        self.assertTrue(r["saved"])
+        self.assertEqual(r["after"]["kind"], "baseline")
+        K.edit_note("c", {"component": "api", "match": "request-id", "note": "nginx 자체 id 만 남는다"})
+        K.edit_note("c", {"component": "api", "match": "6h", "remove": True})
+        notes = K.load_flows("c")["normal"]
+        self.assertEqual(notes, [{"component": "api", "note": "nginx 자체 id 만 남는다", "kind": "howto"}])
+        self.assertEqual(list(K.load_flows("c")["flows"]), ["f"])                      # 흐름은 그대로
+        with self.assertRaises(LookupError):
+            K.edit_note("c", {"component": "api", "match": "없는 글", "remove": True})
+        with self.assertRaises(ValueError):
+            K.edit_note("c", {"component": "api", "match": "nginx", "kind": "모름"})
+
+    def test_dry_run_does_not_write(self):
+        before = (Path(self.t.name) / "c" / "flows.yaml").read_text()
+        r = K.edit_note("c", {"component": "api", "match": "request-id", "remove": True}, apply=False)
+        self.assertFalse(r["saved"])
+        self.assertEqual((Path(self.t.name) / "c" / "flows.yaml").read_text(), before)
+
+    def test_recur_adds_component(self):
+        f = K.write_incident("c", {"date": "2026-10-13", "components": ["api"], "logs": ["boom happened"], "cause": "x"})
+        K.recur_incident("c", f.name, {"date": "2026-10-14", "note": "job 에서도", "components": ["job"]})
+        meta, _ = K.parse_front(f.read_text())
+        self.assertEqual(meta["components"], ["api", "job"])
+        p = K.context("c", "job 이 이상해", incidents=K.load_incidents("c"))
+        self.assertEqual([k["file"] for k in p["incidents"]], [f.name])
 
 
 if __name__ == "__main__":

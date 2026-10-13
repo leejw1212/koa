@@ -11,7 +11,9 @@
                                                                 # 질문(또는 지정한 이름)에 해당하는 지식만 꺼낸다
   python3 koa/knowledge.py notes <클러스터> [찾을 말] [--untyped]   # 노트 목록 (종류 없는 노트는 제안 종류와 함께)
   python3 koa/knowledge.py add <클러스터> '<json>' [--dry-run]     # 지식에 더한다 (지우거나 덮지 않음)
+  python3 koa/knowledge.py note <클러스터> '<json>' [--dry-run]    # 노트 하나 고치기·지우기 {"component","match","note"?,"kind"?,"remove"?}
   python3 koa/knowledge.py incident <클러스터> '<json>'            # 과거 이슈 1건 기록
+  python3 koa/knowledge.py recur <클러스터> <이슈파일> '<json>'     # 같은 원인 재발 {"date","note","logs"?,"components"?}
   python3 koa/knowledge.py suggest <클러스터> '<json>' --title "…" [--source 분석]   # 제안으로만 남긴다
   python3 koa/knowledge.py suggestions <클러스터>                  # 남아 있는 제안
   python3 koa/knowledge.py accept|dismiss <클러스터> <id>          # 제안을 지식에 더하기 / 버리기
@@ -64,6 +66,9 @@ UNTYPED = ("노트", "종류 없음 — 내용대로 쓴다")
 # 주제 노트를 고를 때 먼저 넣는 종류 (종류 없는 노트는 제안 종류로 줄을 세운다)
 KIND_RANK = ("rule", "pitfall", "howto", "structure", "baseline", "normal")
 TOPIC_BUDGET = 3000   # context 에 넣는 주제 노트 글자 수 상한 (넘는 것은 주제 이름과 개수만 알린다)
+GROUP_EXPAND = 5      # 질문이 멤버를 안 짚은 그룹 칸: 이 수 이하면 멤버 전부를 범위에, 넘으면 이름만 (멤버 노트가 분석을 덮지 않게)
+BASELINE_DAYS = 60    # 평소 수치 노트가 이보다 오래되면 check 가 다시 재자고 알린다
+WEAK_SIG = re.compile(r"^\s*(\d{1,3}(\.\d{1,3}){3}(:\d+)?|[A-Za-z0-9_.-]{1,9})\s*$")   # IP·짧은 낱말: 정상 로그에도 걸린다
 # 노트 글에서 종류를 짐작하는 단서. 점수 = 겹친 단서 수(둘까지) × 무게, 같으면 앞 종류. 제안일 뿐이고 사용자가 고른다
 KIND_CUES = (
     ("pitfall", 5, re.compile(r"오프셋|공존|보정|주의|착각|섞여|섞인|아니라|다르다|다름|함정|조심|헷갈")),
@@ -882,8 +887,53 @@ def recur_incident(cluster, name, rec):
     new = [x for x in (rec.get("logs") or []) if x and x not in logs]
     if new:
         meta["signature"] = {"logs": logs + new}
+    # 다른 구성요소에서 재발했으면 그 구성요소도 이슈에 붙인다 (안 붙이면 그 구성요소를 분석할 때 이 이슈가 안 나온다)
+    have = [str(x) for x in (meta.get("components") or [])]
+    more = [str(x) for x in (rec.get("components") or []) if str(x).strip() and str(x) not in have]
+    if more:
+        meta["components"] = have + more
     f.write_text(incident_text(meta, body))
     return f, True
+
+
+def edit_note(cluster, spec, apply=True):
+    """노트 하나를 고치거나 지운다 (add 는 더하기만 하니, 틀린 노트·지난 수치는 이걸로).
+    spec: {"component": 대상(정확히), "match": 글 일부 (그 대상의 노트 중 딱 하나에만 있어야 한다),
+           "note"?: 새 글, "kind"?: 새 종류, "remove"?: true}
+    반환: {"before": 노트, "after": 노트 | None, "saved": bool, "check": [...]}"""
+    spec = spec if isinstance(spec, dict) else {}
+    tgt, match = str(spec.get("component") or "").strip(), str(spec.get("match") or "").strip()
+    if not tgt or not match:
+        raise ValueError("component 와 match 가 필요하다")
+    meta = {}
+    data = load_flows(cluster, meta=meta)
+    normal = [dict(x) for x in data.get("normal") or [] if isinstance(x, dict)]
+    hits = [i for i, n in enumerate(normal) if str(n.get("component")) == tgt and match in str(n.get("note") or "")]
+    if len(hits) != 1:
+        raise LookupError("노트 %s 에서 '%s' 가 든 것이 %d개다 (딱 하나여야 한다)" % (tgt, match, len(hits)))
+    i = hits[0]
+    before = dict(normal[i])
+    if spec.get("remove"):
+        after = None
+        del normal[i]
+    else:
+        after = dict(before)
+        if str(spec.get("note") or "").strip():
+            after["note"] = str(spec["note"]).strip()
+        if spec.get("kind") is not None:
+            k = note_kind(spec["kind"])
+            if k is None:
+                raise ValueError("종류 '%s' 를 모른다 (%s 중 하나)" % (spec["kind"], ", ".join(NOTE_KINDS)))
+            after["kind"] = k
+        if after == before:
+            raise ValueError("바꿀 것이 없다 (note, kind, remove 중 하나를 준다)")
+        normal[i] = after
+    sdata = {"components": data.get("components") or {}, "flows": data.get("flows") or {}, "normal": normal}
+    out = {"before": before, "after": after, "saved": False, "check": []}
+    if apply:
+        out["check"] = save_shards(cluster, sdata, base={"version": meta["version"], "data": data})["check"]
+        out["saved"] = True
+    return out
 
 
 # ---------- 제안 (flowmap 이나 분석이 찾은 것, 사용자가 고르면 더한다) ----------
@@ -991,9 +1041,11 @@ STARTER = """# %s
 
 # ---------- 검사 ----------
 
-def check(cluster, data=None):
-    """지식의 문제 목록 [(level, 문구)]. level: error | warn."""
+def check(cluster, data=None, incidents=None):
+    """지식의 문제 목록 [(level, 문구)]. level: error | warn.
+    incidents: 과거 이슈 목록 (None 이면 클러스터 폴더에서 읽는다)."""
     data = data if data is not None else load_flows(cluster)
+    incidents = incidents if incidents is not None else load_incidents(cluster)
     comps = data.get("components") or {}
     out = []
     owner = {}
@@ -1054,6 +1106,30 @@ def check(cluster, data=None):
             if hint:
                 out.append(("warn", "노트 '%s' 는 구성요소·그룹 이름이 아니라 주제 노트로 읽힌다 → %s 에 붙일 거면 그 이름으로 고친다" % (
                     tgt, " / ".join(hint[:3]))))
+        if n.get("kind") == "baseline":
+            d = _date(str(n.get("note") or ""))
+            if not d:
+                out.append(("warn", "노트 %s [평소 수치]: 잰 날짜가 없다 → 글에 YYYY-MM-DD 를 적는다 (%s)" % (
+                    tgt, _short(n.get("note"), 40))))
+            elif (dt.date.today() - d).days > BASELINE_DAYS:
+                out.append(("warn", "노트 %s [평소 수치]: %s 에 잰 값이라 %d일이 지났다 → 다시 재서 고친다 (knowledge.py note) (%s)" % (
+                    tgt, d.isoformat(), (dt.date.today() - d).days, _short(n.get("note"), 40))))
+    # 과거 이슈: 구성요소 칸이 지식의 이름이 아니면 어떤 context 에도 안 나온다. 로그 문구가 IP·짧은 낱말이면 정상 로그에도 걸린다
+    for inc in incidents or []:
+        m = inc.get("meta") or {}
+        if not m:
+            out.append(("warn", "과거 이슈 %s: 머리말(---…---)을 읽지 못했다 (YAML 오류) → 이 이슈는 분석에 안 나온다. 따옴표를 확인한다" % (
+                inc.get("file"))))
+            continue
+        for x in m.get("components") or []:
+            if not node_to_comps(str(x), comps):
+                hint = similar_comps(str(x), comps)
+                out.append(("warn", "과거 이슈 %s: 구성요소 '%s' 를 지식에서 못 찾는다 → 이 이슈는 분석에 안 나온다 (%s구성요소로 더한다)" % (
+                    inc.get("file"), x, ("%s 로 고치거나 " % " / ".join(hint[:3])) if hint else "")))
+        for s in incident_logs(m):
+            if WEAK_SIG.match(str(s)):
+                out.append(("warn", "과거 이슈 %s: 로그 문구 '%s' 는 IP·짧은 낱말이라 정상 로그에도 걸린다 → 로그 줄의 고유한 문구로 바꾼다" % (
+                    inc.get("file"), s)))
     seen, uniq = set(), []
     for x in out:
         if x not in seen:
@@ -1193,7 +1269,7 @@ def context(cluster, question, names=None, data=None, incidents=None):
                                    for n in flow_nodes(f)):
             hit_f.append(fn)
     scope = list(picked_c)
-    flow_view, group_view = {}, {}
+    flow_view, group_view, group_scope = {}, {}, {}
     for fn in hit_f:
         nodes = flow_nodes(flows[fn])
         flow_view[fn] = flow_text(flows[fn])
@@ -1201,6 +1277,11 @@ def context(cluster, question, names=None, data=None, incidents=None):
             members = node_to_comps(n, comps)
             if n not in comps and members:
                 group_view[n] = members
+                # 그룹 칸은 '이 중 하나 이상'. 말한 멤버가 있으면 그것만 (나머지는 그 칸의 다른 갈래라 이번 경로가 아니다).
+                # 아무도 안 말했으면 작은 그룹은 전부, 큰 그룹은 이름만 알리고 범위에서 뺀다 (멤버 노트가 분석을 덮지 않게)
+                asked_m = [c for c in members if c in picked_c]
+                members = asked_m or (members if len(members) <= GROUP_EXPAND else [])
+                group_scope[n] = members
             for c in members:
                 if c not in scope:
                     scope.append(c)
@@ -1228,7 +1309,7 @@ def context(cluster, question, names=None, data=None, incidents=None):
         members = group or name_to_comps(n["component"], comps)
         if not members:
             topics.append(n)
-        elif set(members) & set(scope):
+        elif set(members) & set(scope) or n["component"] in group_view:   # 그룹 노트는 그 그룹 칸이 범위의 흐름 위에 있으면
             # 대상은 적힌 그대로 둔다 (종류를 채우는 add 는 대상·글이 같아야 한다). 그룹·별명이면 누구인지 덧붙인다
             if n["component"] not in comps:
                 n = dict(n, members=members) if group else dict(n, alias_of=members)
@@ -1249,7 +1330,8 @@ def context(cluster, question, names=None, data=None, incidents=None):
         if not c.get("workload") and not c.get("external"):
             notes.append("%s: 워크로드를 모른다 → 클러스터에서 찾으면 지식에 더하자고 제안" % n)
     return {"request": question, "cluster": cluster, "asked": picked_c, "guessed": guessed, "flows": flow_view,
-            "groups": group_view, "components": {n: comps.get(n) or {} for n in scope}, "incidents": known,
+            "groups": group_view, "group_scope": group_scope,
+            "components": {n: comps.get(n) or {} for n in scope}, "incidents": known,
             "normal": normal, "topics": topics, "notes": notes}
 
 
@@ -1260,7 +1342,14 @@ def context_text(p):
     for fn, nodes in p["flows"].items():
         L.append("흐름 %s: %s" % (fn, nodes))
     for g, members in (p.get("groups") or {}).items():
-        L.append("그룹 %s: %s (흐름의 이 칸은 이 중 하나 이상을 지난다)" % (g, ", ".join(members)))
+        inside = (p.get("group_scope") or {}).get(g, members)
+        if list(inside) == list(members):
+            L.append("그룹 %s: %s (흐름의 이 칸은 이 중 하나 이상을 지난다)" % (g, ", ".join(members)))
+            continue
+        rest = [m for m in members if m not in inside]
+        L.append("그룹 %s (%d개, 흐름의 이 칸은 이 중 하나 이상): %s — 나머지는 범위에서 뺐다: %s (필요하면 --with <이름> 또는 --with %s)" % (
+            g, len(members), ("이번 범위 " + ", ".join(inside)) if inside else "멤버가 많아 이름만 둔다",
+            ", ".join(rest), g))
     if p["components"]:
         L.append("구성요소:")
         for n, c in p["components"].items():
@@ -1279,7 +1368,8 @@ def context_text(p):
             legend.append("%s=%s" % UNTYPED)
         L.append("노트 읽는 법: " + " · ".join(legend))
     for n in p["normal"]:
-        who = (" (그룹: %s)" % ", ".join(n["members"]) if n.get("members") else
+        who = (" (그룹: %s)" % ", ".join(n["members"]) if n.get("members") and len(n["members"]) <= GROUP_EXPAND else
+               " (그룹 %d개)" % len(n["members"]) if n.get("members") else
                " (= %s)" % ", ".join(n["alias_of"]) if n.get("alias_of") else "")
         L.append("노트 %s%s [%s]: %s" % (n.get("component"), who, kind_label(n.get("kind")), n.get("note")))
     if p.get("topics"):
@@ -1360,7 +1450,11 @@ def main():
     rp = sub.add_parser("recur", help="같은 원인 재발: 기존 이슈에 한 줄 더한다")
     rp.add_argument("cluster")
     rp.add_argument("file", help="incidents/ 안의 파일 이름 (context 출력의 이름)")
-    rp.add_argument("json", help='{"date": "...", "note": "...", "logs": [...]}')
+    rp.add_argument("json", help='{"date": "...", "note": "...", "logs": [...], "components": [재발한 구성요소]}')
+    ep = sub.add_parser("note", help="노트 하나 고치기·지우기 (add 는 더하기만 한다)")
+    ep.add_argument("cluster")
+    ep.add_argument("json", help='{"component": 대상, "match": 글 일부, "note"?: 새 글, "kind"?: 종류, "remove"?: true}')
+    ep.add_argument("--dry-run", action="store_true")
     sub.add_parser("suggestions").add_argument("cluster")
     for name in ("accept", "dismiss"):
         p = sub.add_parser(name)
@@ -1395,6 +1489,14 @@ def main():
         elif a.cmd == "recur":
             f, added = recur_incident(a.cluster, a.file, _json_arg(a.json))
             print(("재발을 더했다: %s" if added else "이미 기록된 재발이다: %s") % f)
+        elif a.cmd == "note":
+            r = edit_note(a.cluster, _json_arg(a.json), apply=not a.dry_run)
+            b, af = r["before"], r["after"]
+            print("- 노트 %s [%s]: %s" % (b["component"], kind_label(b.get("kind")), b["note"]))
+            print("+ 노트 %s [%s]: %s" % (af["component"], kind_label(af.get("kind")), af["note"]) if af else "  (지움)")
+            for lv, msg in r["check"]:
+                print("%s %s" % ("❌" if lv == "error" else "⚠", msg))
+            print("저장했다 (이전 것은 flows.yaml.bak)" if r["saved"] else "미리 보기다 (저장 안 함)")
         elif a.cmd == "suggest":
             sid = add_suggestion(a.cluster, a.title, _json_arg(a.json), a.source, a.why)
             print("제안 %s 를 남겼다" % sid if sid else "남기지 않았다 (이미 지식에 있거나, 같은 제안이 있거나, 전에 버린 것)")

@@ -39,7 +39,7 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `catalog.yaml` | 무엇을 찾을지(구성요소 감지 규칙)와 찾으면 어떤 MCP 를 붙일지(서버 정의) |
 | `plan.py` | 프로필 + 카탈로그 → 설치 계획. `--apply` 는 `hermes config set mcp_servers.<이름>` 으로 등록 |
 | `query.py` | 카탈로그 `queries`(이름 붙인 조회)·`probe` 를 MCP 로 실행. `--call` 로 허용 목록 안 도구 직접 호출 |
-| `knowledge.py` | 클러스터 지식(`local/knowledge/<클러스터>/`): 질문에 해당하는 부분만 꺼내기(`context`, 주제 노트 포함), 노트 목록(`notes`), OK 받은 것 더하기(`add`, `incident`), 제안(`suggest`·`accept`·`dismiss`), 검사(`check`). `docs/koa.md` |
+| `knowledge.py` | 클러스터 지식(`local/knowledge/<클러스터>/`): 질문에 해당하는 부분만 꺼내기(`context`, 주제 노트 포함), 노트 목록(`notes`), OK 받은 것 더하기(`add`, `incident`, `recur`), 노트 고치기·지우기(`note`), 제안(`suggest`·`accept`·`dismiss`), 검사(`check`). `docs/koa.md` |
 | `stats.py` | 분석 재기: 이 프로필의 Hermes 세션 기록(`state.db`)을 읽기 전용으로 열어 대화마다 작업 시간·모델 응답·도구 호출·탐색(인덱스 목록·매핑)·토큰·비용. `--since`/`--until` 로 개선 전후를 견준다. `docs/koa.md` 7절 |
 | `kube_source.py` | flowmap 이 쓰는 읽기 전용 수집기 (kubernetes MCP 또는 kubectl, get/list 만) |
 | `flowmap.py` | 요청 경로 후보. 지식에 없는 것은 제안으로 남긴다. 입구(Ingress·Route) + 워크로드 설정(env·args·ConfigMap)에 적힌 주소 + 파드 로그(다른 파드 IP·Service 주소·요청 ID)로 연결을 찾고 근거·판정을 붙인다. 클러스터에는 get/list/logs 만. 결과 JSON 은 `<결과>/<이름>.flowmap/`. `docs/koa-flowmap.md` |
