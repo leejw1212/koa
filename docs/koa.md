@@ -225,3 +225,26 @@ python3 koa/stats.py --all --json            # 분석이 아닌 대화도, JSON 
 - **탐색** 은 OpenSearch 인덱스 목록·매핑 보기 호출 수다 (`ListIndexTool`·`IndexMappingTool`). 보는 법 노트가 있으면 줄어야 한다.
 - 비밀처럼 보이는 인자 값(password·token 등)은 `--session` 출력에서 가린다.
 - 같은 장애를 여러 번 돌려 견주는 것은 lab 의 `compare.py --repeat` ([lab/chaos/README.md](../lab/chaos/README.md)).
+
+## 8. 정상 세션 잇기 (`koa/hoptrace.py`)
+
+"정상 세션 추적해줘", "요청이 어디서 멈추는지" 처럼 홉을 이어야 할 때. 에이전트가 로그를 덤프하고 즉석 스크립트로
+잇던 일(실측 약 70콜)을 한 번 실행(get pods/svc 네임스페이스당 1회 + 파드당 logs 1회)으로 바꾼다.
+
+```bash
+python3 koa/hoptrace.py <클러스터> "백엔드 정상 세션" --with 백엔드 [--since 1h] [--all-flows] [--json]
+```
+
+- 범위: `knowledge.context` 의 말한 구성요소 + 그 구성요소를 지나는 http 흐름(큐 흐름은 `--all-flows`).
+- 파드: 워크로드의 ownerReferences 로 고른다 (Deployment selector 는 같은 앱의 job·listener 까지 잡는다).
+  로그는 동시에 읽는다 — 버퍼가 짧은 nginx 가 그사이 밀려나지 않게.
+- 잇는 규칙: `req-<UUID>` 와 `req-<32hex>` 는 하이픈을 떼고 같은 ID. 한 줄에 함께 찍힌 ID(최대 2개: global+local)는
+  한 사슬. nginx access log(ingress-nginx 형식)의 upstream 이름은 Service 로 풀고 selector 로 구성요소에 붙인다.
+  시각은 kubelet 타임스탬프를 UTC 로 맞춘 것 (컨테이너 시계·노드 시간대가 달라도 견줄 수 있다).
+- 결과: 구성요소별 요청 수·상태, 바깥 host, 같은 사슬에 찍힌 구성요소, nginx 를 거친 줄(워크로드·UA),
+  세 홉(호출자 호출 줄 → nginx → 앱)이 이어진 가장 최근 정상 세션과 시간 대조(바깥 ≥ 안쪽이면 "맞음"),
+  워크로드별 로그 보존 깊이(가장 얕은 파드). 요청 줄을 못 찾은 구성요소는 따로 적는다.
+- 못 하는 것: 앱 로그 형식이 `Processed request: <상태> … - <메서드> <URL>` 나 `"<메서드> <경로> HTTP/x" <상태>` 가
+  아니면 요청 줄을 못 찾는다. 호출 줄은 `URL … time|took|elapsed|duration <초>` 형식만. 401 처럼 미들웨어가 끊은
+  요청은 앱 로그에 없으니 nginx 쪽 숫자를 본다.
+

@@ -75,7 +75,12 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    over the window (`kubectl logs --since-time=<window start, RFC3339> ... | grep -c "<line>"`; the MCP
    `kubectl_logs` takes `since` as a duration, so pass one that reaches back to the window start). A hit is the
    strongest lead.
-4. **Walk the flow hop by hop** over the components in the slice, in flow order (for a queue backlog start
+4. **Trace before reading pod by pod.** When the question is about requests through an http flow (stops, slow,
+   which caller), run `python3 koa/hoptrace.py <cluster> "<question>" [--with …] --since <window>` first: one
+   read-only run gives per-component requests/status, callers on the same request chain, nginx hops with UA, a
+   joined normal session with outer ≥ inner timing, and log retention per workload. Then read only the hops it
+   could not join (`요청 줄을 못 찾은 구성요소`, `버퍼 밖`).
+5. **Walk the flow hop by hop** over the components in the slice, in flow order (for a queue backlog start
    at the consumer, then broker, then the consumer's downstream, then the producer). Per hop: pods
    (ready/restarts/lastState), events for those pods in the window, logs (the window, `tail`, the component's
    `로그` lines), and the call to the next hop. Judge each against its notes before calling it abnormal (a
@@ -84,11 +89,11 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    slice keeps only that member (`그룹 백엔드 (16개 …): 이번 범위 …`); siblings are other branches of that hop,
    not this path — widen with `--with <이름>` only when the evidence points there.
    The cause point is where the flow turns from normal to abnormal.
-5. **Hypotheses**: 2–3 with evidence for/against; share the early read, then confirm.
-6. **Report**: conclusion + confidence, the time window you looked at, evidence table (hop · what was checked ·
+6. **Hypotheses**: 2–3 with evidence for/against; share the early read, then confirm.
+7. **Report**: conclusion + confidence, the time window you looked at, evidence table (hop · what was checked ·
    tool · result), what could not be verified, where the knowledge didn't match the cluster (missing workload,
    wrong hop).
-7. **Knowledge proposal** — always end with it, even if empty ("새로 알게 된 것 없음"):
+8. **Knowledge proposal** — always end with it, even if empty ("새로 알게 된 것 없음"):
 
    | 종류 | 내용 | 근거 |
    |---|---|---|
@@ -136,7 +141,7 @@ cluster (discover, MCP setup) is `koa-cluster-discovery`.
    the answer (what failed, what you did instead), even when the retry worked.
    Rows the user declines but that may matter later → `knowledge.py suggest <c> '<json>' --title "…" --why "…"`
    only if they say "나중에". Use `--dry-run` first when unsure what `add` will change.
-8. **Self-improvement — do it in this same reply, before the final answer** (no OK needed, tell the user in one
+9. **Self-improvement — do it in this same reply, before the final answer** (no OK needed, tell the user in one
    line what you saved). Never defer it to "a later/interactive session": skill_manage works in every mode,
    including one-shot `chat -q`. Skip only if the lesson is already in `koa-learned`. a cluster-independent analysis lesson →
    one line under "## Lessons" of the `koa-learned` skill (skill_manage patch; `python3 koa/learned.py init` if

@@ -17,6 +17,7 @@ python3 koa/knowledge.py context <이름> "rmq 소비가 안 돼"   # 5) 분석:
 python3 koa/knowledge.py add <이름> '<json>'      #    사용자가 OK 한 것만 지식에 더한다
 python3 koa/flowmap.py                   # 6) 요청이 지나는 길 후보: 설정·로그만 읽고, 새 것은 지식 제안으로 남긴다
 python3 koa/stats.py                     # 7) 분석마다 걸린 시간·토큰·도구 호출 (Hermes 세션 기록을 읽기만)
+python3 koa/hoptrace.py <이름> "백엔드 세션" --with 백엔드   # 8) 말한 구성요소의 정상 세션을 홉별로 잇는다 (로그만 읽음)
 python3 koa/readonly.py [MCP...]     # (단독) 백엔드 계정이 읽기 전용인지
 python3 koa/check_mcp.py [MCP...]    # (단독) 실제 도구 목록과 include 비교
 python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 다시 만들기
@@ -41,6 +42,7 @@ python3 koa/report.py <이름>         # (선택) 프로필만으로 보고서 �
 | `query.py` | 카탈로그 `queries`(이름 붙인 조회)·`probe` 를 MCP 로 실행. `--call` 로 허용 목록 안 도구 직접 호출 |
 | `knowledge.py` | 클러스터 지식(`local/knowledge/<클러스터>/`): 질문에 해당하는 부분만 꺼내기(`context`, 주제 노트 포함), 노트 목록(`notes`), OK 받은 것 더하기(`add`, `incident`, `recur`), 노트 고치기·지우기(`note`), 제안(`suggest`·`accept`·`dismiss`), 검사(`check`). `docs/koa.md` |
 | `stats.py` | 분석 재기: 이 프로필의 Hermes 세션 기록(`state.db`)을 읽기 전용으로 열어 대화마다 작업 시간·모델 응답·도구 호출·탐색(인덱스 목록·매핑)·토큰·비용. `--since`/`--until` 로 개선 전후를 견준다. `docs/koa.md` 7절 |
+| `hoptrace.py` | 정상 세션 잇기: `knowledge.context` 와 같은 범위(말한 구성요소 + http 흐름)의 파드 로그만 동시에 읽어, 요청 ID(하이픈·32hex 같은 것으로)·nginx upstream→Service→구성요소·kubelet 시각(UTC)으로 홉을 잇고 바깥 ≥ 안쪽 시간을 대조한다. 구성요소별 요청·상태·바깥 host·같은 사슬의 구성요소·nginx UA, 워크로드별 로그 보존 깊이. 클러스터에는 get pods/svc·logs 만, 지식은 안 고친다. `docs/koa.md` 8절 |
 | `kube_source.py` | flowmap 이 쓰는 읽기 전용 수집기 (kubernetes MCP 또는 kubectl, get/list 만) |
 | `flowmap.py` | 요청 경로 후보. 지식에 없는 것은 제안으로 남긴다. 입구(Ingress·Route) + 워크로드 설정(env·args·ConfigMap)에 적힌 주소 + 파드 로그(다른 파드 IP·Service 주소·요청 ID)로 연결을 찾고 근거·판정을 붙인다. 클러스터에는 get/list/logs 만. 결과 JSON 은 `<결과>/<이름>.flowmap/`. `docs/koa-flowmap.md` |
 | `tests/` | 클러스터 없이 도는 규칙 검사 (`python3 koa/tests/test_flowmap.py` 등) |
